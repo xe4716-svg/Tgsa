@@ -790,7 +790,13 @@ async def set_plan_price(
                     "plan_code": plan["code"],
                     "currency": currency,
                     "duration_days": duration_days,
-                    "before": dict(previous) if previous else None,
+                    "before": (
+                        {
+                            "amount_minor": previous["amount_minor"],
+                            "version": previous["version"],
+                        }
+                        if previous else None
+                    ),
                     "after": {
                         "amount_minor": payload.amount_minor,
                         "version": version,
