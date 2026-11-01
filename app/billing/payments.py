@@ -305,6 +305,15 @@ async def create_wallet_topup(
                 "SELECT set_config('app.tenant_id', $1, true)",
                 str(principal.tenant_id),
             )
+            await conn.execute(
+                """
+                UPDATE wallet_topup_orders
+                SET status = 'EXPIRED', updated_at = NOW()
+                WHERE tenant_id = $1 AND provider <> 'USDT'
+                  AND status = 'PENDING' AND expires_at <= NOW()
+                """,
+                principal.tenant_id,
+            )
             await conn.fetchrow(
                 "SELECT id FROM tenants WHERE id = $1 FOR UPDATE",
                 principal.tenant_id,
@@ -517,6 +526,15 @@ async def list_wallet_topups(
                 "SELECT set_config('app.tenant_id', $1, true)",
                 str(principal.tenant_id),
             )
+            await conn.execute(
+                """
+                UPDATE wallet_topup_orders
+                SET status = 'EXPIRED', updated_at = NOW()
+                WHERE tenant_id = $1 AND provider <> 'USDT'
+                  AND status = 'PENDING' AND expires_at <= NOW()
+                """,
+                principal.tenant_id,
+            )
             rows = await conn.fetch(
                 """
                 SELECT * FROM wallet_topup_orders
@@ -540,6 +558,15 @@ async def get_wallet_topup(
             await conn.execute(
                 "SELECT set_config('app.tenant_id', $1, true)",
                 str(principal.tenant_id),
+            )
+            await conn.execute(
+                """
+                UPDATE wallet_topup_orders
+                SET status = 'EXPIRED', updated_at = NOW()
+                WHERE tenant_id = $1 AND provider <> 'USDT'
+                  AND status = 'PENDING' AND expires_at <= NOW()
+                """,
+                principal.tenant_id,
             )
             row = await conn.fetchrow(
                 """
