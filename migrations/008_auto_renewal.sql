@@ -392,10 +392,15 @@ AS $reminders$
       ON ar.tenant_id = s.tenant_id AND ar.subscription_id = s.id
     CROSS JOIN billing_automation_settings cfg
     WHERE s.expires_at IS NOT NULL
-      AND s.status IN ('ACTIVE', 'TRIALING', 'PAST_DUE', 'EXPIRED')
       AND (
-          s.expires_at <= NOW() + INTERVAL '366 days'
-          OR (s.status = 'EXPIRED' AND s.expiry_notified_at IS NULL)
+          (
+              s.status IN ('ACTIVE', 'TRIALING', 'PAST_DUE')
+              AND s.expires_at <= NOW() + INTERVAL '366 days'
+          )
+          OR (
+              s.status = 'EXPIRED'
+              AND s.expiry_notified_at IS NULL
+          )
       )
     ORDER BY s.expires_at
     LIMIT LEAST(GREATEST(COALESCE(p_limit, 1000), 1), 5000)
