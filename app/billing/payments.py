@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from urllib.parse import parse_qs
+from uuid import uuid4
 
 import httpx
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -237,6 +236,24 @@ async def update_payment_method(
             payload.public_instructions,
             principal.user_id,
         )
+        if row:
+            await conn.execute(
+                """
+                INSERT INTO platform_audit_logs (
+                    actor_user_id, action, resource_type, resource_id, details
+                )
+                VALUES ($1, 'PAYMENT_PROVIDER_CONFIG_UPDATED',
+                        'payment_provider_config', NULL, $2::jsonb)
+                """,
+                principal.user_id,
+                json.dumps({
+                    "provider": provider,
+                    "enabled": row["enabled"],
+                    "min_amount_minor": row["min_amount_minor"],
+                    "max_amount_minor": row["max_amount_minor"],
+                    "sort_order": row["sort_order"],
+                }),
+            )
     if not row:
         raise HTTPException(status_code=404, detail="Payment provider not found")
     ready, reason = provider_readiness(provider)
@@ -380,7 +397,7 @@ async def create_wallet_topup(
                 await conn.execute(
                     """
                     UPDATE wallet_topup_orders
-                    SET status = 'FAILED', updated_at = NOW(),
+                    SET updated_at = NOW(),
                         metadata = metadata || $3::jsonb
                     WHERE tenant_id = $1 AND id = $2 AND status = 'PENDING'
                     """,
