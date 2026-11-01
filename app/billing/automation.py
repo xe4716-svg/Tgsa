@@ -572,6 +572,14 @@ async def remove_telegram_notification_link(
             )
             await conn.execute(
                 """
+                DELETE FROM tenant_telegram_link_tokens
+                WHERE tenant_id = $1 AND user_id = $2
+                """,
+                principal.tenant_id,
+                principal.user_id,
+            )
+            await conn.execute(
+                """
                 UPDATE tenant_billing_preferences
                 SET telegram_notifications_enabled = EXISTS (
                         SELECT 1 FROM tenant_telegram_notification_links
