@@ -777,9 +777,23 @@ def _parse_form_request(request: Request, raw_body: bytes) -> dict[str, str]:
     return values
 
 
+async def _read_webhook_body(request: Request) -> bytes:
+    declared_length = request.headers.get("content-length")
+    if declared_length:
+        try:
+            if int(declared_length) > 1_048_576:
+                raise HTTPException(status_code=413, detail="Payment callback body is too large")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid content length") from exc
+    raw = await request.body()
+    if len(raw) > 1_048_576:
+        raise HTTPException(status_code=413, detail="Payment callback body is too large")
+    return raw
+
+
 @router.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
-    raw = await request.body()
+    raw = await _read_webhook_body(request)
     try:
         event = verify_stripe_event(raw, request.headers.get("Stripe-Signature"))
         details = stripe_payment_details(event)
@@ -793,7 +807,7 @@ async def stripe_webhook(request: Request):
 
 @router.post("/webhooks/alipay")
 async def alipay_webhook(request: Request):
-    raw = await request.body()
+    raw = await _read_webhook_body(request)
     try:
         params = _parse_form_request(request, raw)
         verified = verify_alipay_notification(params)
@@ -807,7 +821,7 @@ async def alipay_webhook(request: Request):
 
 @router.post("/webhooks/wechat")
 async def wechat_webhook(request: Request):
-    raw = await request.body()
+    raw = await _read_webhook_body(request)
     try:
         verified = verify_wechat_notification(raw, request.headers)
         details = wechat_payment_details(verified)
