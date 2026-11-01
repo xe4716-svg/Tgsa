@@ -697,6 +697,14 @@ async def _process_renewal_intent(pool, intent) -> None:
                     tenant_id,
                     intent_id,
                 )
+                await conn.execute(
+                    """
+                    UPDATE tenant_auto_renew_settings
+                    SET enabled = FALSE, updated_at = NOW()
+                    WHERE tenant_id = $1
+                    """,
+                    tenant_id,
+                )
                 return
             if (
                 state["subscription_status"] not in {"ACTIVE", "TRIALING"}
