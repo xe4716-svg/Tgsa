@@ -14,6 +14,7 @@ on:
       - 'migrations/006_wallet_commerce.sql'
       - 'migrations/007_payment_orchestration.sql'
       - 'migrations/008_auto_renewal.sql'
+      - 'migrations/009_telegram_notifications.sql'
       - 'app/billing/payment_gateway.py'
       - 'app/billing/payments.py'
       - 'app/main.py'
@@ -147,4 +148,16 @@ jobs:
           psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "INSERT INTO billing_email_outbox(tenant_id, user_id, dedupe_key, subject, body) VALUES ('$TENANT_C', '$USER_C', 'ci-email-outbox', 'CI billing email', 'CI billing outbox smoke test')"
           EMAILS_CLAIMED=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT COUNT(*) FROM claim_due_billing_emails(50)")
           test "$EMAILS_CLAIMED" = "1"
+          psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "INSERT INTO tenant_telegram_link_tokens(token_hash, tenant_id, user_id, expires_at) VALUES (repeat('c', 64), '$TENANT_C', '$USER_C', NOW() + INTERVAL '15 minutes')"
+          TELEGRAM_LINKED=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT consume_telegram_link_token(repeat('c', 64)::char(64), 123456789, 123456789, 'ci_telegram')")
+          test "$TELEGRAM_LINKED" = "t"
+          TELEGRAM_LINK_VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_C', true); SELECT COUNT(*) FROM tenant_telegram_notification_links; COMMIT" | tail -n 1)
+          test "$TELEGRAM_LINK_VISIBLE" = "1"
+          psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "INSERT INTO telegram_notification_outbox(tenant_id, user_id, dedupe_key, message_text) VALUES ('$TENANT_C', '$USER_C', 'ci-telegram-outbox', 'CI Telegram outbox smoke test')"
+          TELEGRAM_CLAIMED=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT COUNT(*) FROM claim_due_telegram_notifications(50)")
+          test "$TELEGRAM_CLAIMED" = "1"
+          TELEGRAM_UNLINKED=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT unlink_telegram_user(123456789)")
+          test "$TELEGRAM_UNLINKED" = "1"
+          TELEGRAM_OUTBOX_STATUS=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_C', true); SELECT status FROM telegram_notification_outbox WHERE dedupe_key = 'ci-telegram-outbox'; COMMIT" | tail -n 1)
+          test "$TELEGRAM_OUTBOX_STATUS" = "FAILED"
 
