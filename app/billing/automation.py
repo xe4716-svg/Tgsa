@@ -1498,6 +1498,153 @@ async def _send_due_billing_emails(pool, lock_conn) -> None:
                     )
 
 
+async def _send_due_telegram_notifications(pool, lock_conn) -> None:
+    if not settings.platform_telegram_bot_token:
+        return
+    rows = await lock_conn.fetch("SELECT * FROM claim_due_telegram_notifications(50)")
+    if not rows:
+        return
+
+    api_base = f"https://api.telegram.org/bot{settings.platform_telegram_bot_token}"
+    async with httpx.AsyncClient(timeout=15) as client:
+        for row in rows:
+            tenant_id = row["tenant_id"]
+            user_id = row["user_id"]
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_id))
+                    current = await conn.fetchrow(
+                        """
+                        SELECT l.chat_id, o.status
+                        FROM telegram_notification_outbox o
+                        LEFT JOIN tenant_telegram_notification_links l
+                          ON l.tenant_id = o.tenant_id AND l.user_id = o.user_id
+                        WHERE o.tenant_id = $1 AND o.id = $2
+                        """,
+                        tenant_id,
+                        row["id"],
+                    )
+            if not current or current["status"] != "PROCESSING" or current["chat_id"] is None:
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_id))
+                        await conn.execute(
+                            """
+                            UPDATE telegram_notification_outbox
+                            SET status = 'FAILED', last_error_code = 'TELEGRAM_LINK_REMOVED',
+                                updated_at = NOW()
+                            WHERE tenant_id = $1 AND id = $2 AND status = 'PROCESSING'
+                            """,
+                            tenant_id,
+                            row["id"],
+                        )
+                continue
+
+            status = "SENT"
+            error_code = None
+            retry_after = None
+            try:
+                response = await client.post(
+                    f"{api_base}/sendMessage",
+                    json={
+                        "chat_id": current["chat_id"],
+                        "text": row["message_text"][:4096],
+                        "disable_web_page_preview": True,
+                    },
+                )
+                try:
+                    result = response.json()
+                except ValueError:
+                    result = {}
+                if response.status_code >= 300 or result.get("ok") is not True:
+                    error_code = str(
+                        result.get("description")
+                        or f"TELEGRAM_HTTP_{response.status_code}"
+                    )[:80]
+                    parameters = result.get("parameters") or {}
+                    if response.status_code == 429:
+                        retry_after = int(parameters.get("retry_after") or 60)
+                    if response.status_code == 403 or result.get("error_code") == 403:
+                        status = "FAILED"
+                    else:
+                        status = "FAILED" if int(row["attempt_count"]) >= 5 else "PENDING"
+                else:
+                    status = "SENT"
+            except httpx.HTTPError as exc:
+                error_code = type(exc).__name__[:80]
+                status = "FAILED" if int(row["attempt_count"]) >= 5 else "PENDING"
+
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_id))
+                    if status == "SENT":
+                        await conn.execute(
+                            """
+                            UPDATE telegram_notification_outbox
+                            SET status = 'SENT', sent_at = NOW(),
+                                last_error_code = NULL, updated_at = NOW()
+                            WHERE tenant_id = $1 AND id = $2 AND status = 'PROCESSING'
+                            """,
+                            tenant_id,
+                            row["id"],
+                        )
+                        await conn.execute(
+                            """
+                            UPDATE tenant_telegram_notification_links
+                            SET last_message_at = NOW()
+                            WHERE tenant_id = $1 AND user_id = $2
+                            """,
+                            tenant_id,
+                            user_id,
+                        )
+                    else:
+                        if error_code and (
+                            "blocked by the user" in error_code.lower()
+                            or "chat not found" in error_code.lower()
+                            or "bot was blocked" in error_code.lower()
+                        ):
+                            await conn.execute(
+                                """
+                                DELETE FROM tenant_telegram_notification_links
+                                WHERE tenant_id = $1 AND user_id = $2
+                                """,
+                                tenant_id,
+                                user_id,
+                            )
+                            await conn.execute(
+                                """
+                                UPDATE tenant_billing_preferences
+                                SET telegram_notifications_enabled = EXISTS (
+                                        SELECT 1 FROM tenant_telegram_notification_links
+                                        WHERE tenant_id = $1
+                                    ),
+                                    updated_at = NOW()
+                                WHERE tenant_id = $1
+                                """,
+                                tenant_id,
+                            )
+                            status = "FAILED"
+                            error_code = "TELEGRAM_CHAT_UNAVAILABLE"
+                        delay_seconds = retry_after or min(
+                            21600,
+                            60 * (2 ** min(int(row["attempt_count"]), 8)),
+                        )
+                        await conn.execute(
+                            """
+                            UPDATE telegram_notification_outbox
+                            SET status = $3, last_error_code = $4,
+                                next_attempt_at = NOW() + ($5 * INTERVAL '1 second'),
+                                updated_at = NOW()
+                            WHERE tenant_id = $1 AND id = $2 AND status = 'PROCESSING'
+                            """,
+                            tenant_id,
+                            row["id"],
+                            status,
+                            error_code,
+                            delay_seconds,
+                        )
+
+
 async def _wait_or_stop(stop_event: asyncio.Event, seconds: int) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
@@ -1529,6 +1676,7 @@ async def run_billing_automation(pool, stop_event: asyncio.Event) -> None:
                                 await _process_renewal_intent(pool, intent)
                             await _process_expiry_reminders(pool)
                             await _send_due_billing_emails(pool, lock_conn)
+                            await _send_due_telegram_notifications(pool, lock_conn)
                         except Exception:
                             logger.exception("Billing automation iteration failed")
                             if lock_conn.is_closed():
