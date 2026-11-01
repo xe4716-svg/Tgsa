@@ -248,7 +248,7 @@ BEGIN
         last_error_code = NULL,
         price_notice_sent_at = NULL,
         updated_at = NOW()
-    WHERE subscription_renewal_intents.status IN ('CANCELED', 'FAILED')
+    WHERE subscription_renewal_intents.status = 'CANCELED'
       AND subscription_renewal_intents.paid_order_id IS NULL;
 
     GET DIAGNOSTICS inserted_count = ROW_COUNT;
