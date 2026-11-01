@@ -458,18 +458,227 @@ async def get_billing_notification_preferences(
             row = await conn.fetchrow(
                 """
                 SELECT timezone, email_notifications_enabled,
-                       telegram_notifications_enabled, timezone_confirmed_at
+                       telegram_notifications_enabled, timezone_confirmed_at,
+                       EXISTS (
+                           SELECT 1 FROM tenant_telegram_notification_links l
+                           WHERE l.tenant_id = tenant_billing_preferences.tenant_id
+                             AND l.user_id = $2
+                       ) AS telegram_linked
                 FROM tenant_billing_preferences
                 WHERE tenant_id = $1
                 """,
                 principal.tenant_id,
+                principal.user_id,
             )
     return {
         "timezone": row["timezone"] if row else "UTC",
         "email_notifications_enabled": row["email_notifications_enabled"] if row else True,
         "telegram_notifications_enabled": row["telegram_notifications_enabled"] if row else False,
+        "telegram_linked": row["telegram_linked"] if row else False,
         "timezone_confirmed_at": row["timezone_confirmed_at"] if row else None,
     }
+
+
+@router.get("/billing/telegram-link")
+async def get_telegram_notification_link(
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(principal.tenant_id))
+            row = await conn.fetchrow(
+                """
+                SELECT telegram_user_id, username, linked_at
+                FROM tenant_telegram_notification_links
+                WHERE tenant_id = $1 AND user_id = $2
+                """,
+                principal.tenant_id,
+                principal.user_id,
+            )
+    return {
+        "linked": bool(row),
+        "username": row["username"] if row else None,
+        "linked_at": row["linked_at"] if row else None,
+    }
+
+
+@router.post("/billing/telegram-link")
+async def create_telegram_notification_link(
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    if not (
+        settings.platform_telegram_bot_token
+        and settings.platform_telegram_bot_username
+        and settings.platform_telegram_webhook_secret
+    ):
+        raise HTTPException(status_code=503, detail="Platform Telegram notification bot is not configured")
+    raw_token = secrets.token_urlsafe(24)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(principal.tenant_id))
+            await conn.execute(
+                """
+                DELETE FROM tenant_telegram_link_tokens
+                WHERE tenant_id = $1 AND user_id = $2
+                  AND (used_at IS NOT NULL OR expires_at <= NOW())
+                """,
+                principal.tenant_id,
+                principal.user_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO tenant_telegram_link_tokens (
+                    token_hash, tenant_id, user_id, expires_at
+                )
+                VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes')
+                """,
+                token_hash,
+                principal.tenant_id,
+                principal.user_id,
+            )
+            expires_at = await conn.fetchval(
+                """
+                SELECT expires_at FROM tenant_telegram_link_tokens
+                WHERE token_hash = $1
+                """,
+                token_hash,
+            )
+    username = settings.platform_telegram_bot_username.strip().lstrip("@")
+    return {
+        "bot_username": username,
+        "deep_link": f"https://t.me/{username}?start={raw_token}",
+        "expires_at": expires_at,
+        "expires_in_seconds": 900,
+    }
+
+
+@router.delete("/billing/telegram-link")
+async def remove_telegram_notification_link(
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(principal.tenant_id))
+            await conn.execute(
+                """
+                DELETE FROM tenant_telegram_notification_links
+                WHERE tenant_id = $1 AND user_id = $2
+                """,
+                principal.tenant_id,
+                principal.user_id,
+            )
+            await conn.execute(
+                """
+                UPDATE tenant_billing_preferences
+                SET telegram_notifications_enabled = EXISTS (
+                        SELECT 1 FROM tenant_telegram_notification_links
+                        WHERE tenant_id = $1
+                    ),
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                """,
+                principal.tenant_id,
+            )
+            await conn.execute(
+                """
+                UPDATE telegram_notification_outbox
+                SET status = 'FAILED',
+                    last_error_code = 'TELEGRAM_LINK_REMOVED',
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND user_id = $2
+                  AND status IN ('PENDING', 'PROCESSING')
+                """,
+                principal.tenant_id,
+                principal.user_id,
+            )
+    return {"linked": False}
+
+
+@router.post("/webhooks/platform-telegram")
+async def platform_telegram_webhook(request: Request):
+    expected_secret = settings.platform_telegram_webhook_secret
+    if not (
+        settings.platform_telegram_bot_token
+        and expected_secret
+    ):
+        raise HTTPException(status_code=503, detail="Platform Telegram webhook is not configured")
+    supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not hmac.compare_digest(supplied_secret, expected_secret):
+        raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+
+    declared_length = request.headers.get("content-length")
+    if declared_length:
+        try:
+            if int(declared_length) > 1_048_576:
+                raise HTTPException(status_code=413, detail="Telegram update is too large")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid content length") from exc
+    raw = await request.body()
+    if len(raw) > 1_048_576:
+        raise HTTPException(status_code=413, detail="Telegram update is too large")
+    try:
+        update = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid Telegram update JSON") from exc
+
+    message = update.get("message") or update.get("edited_message") or {}
+    chat = message.get("chat") or {}
+    sender = message.get("from") or {}
+    text_value = message.get("text") or ""
+    if chat.get("type") != "private" or not sender.get("id"):
+        return {"ok": True}
+
+    telegram_user_id = int(sender["id"])
+    chat_id = int(chat["id"])
+    parts = text_value.split(maxsplit=1)
+    command = parts[0].split("@", 1)[0] if parts else ""
+
+    reply = None
+    if command == "/start":
+        if len(parts) == 2:
+            raw_token = parts[1].strip()
+            token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+            async with request.app.state.db_pool.acquire() as conn:
+                linked = await conn.fetchval(
+                    """
+                    SELECT consume_telegram_link_token($1::char(64), $2, $3, $4)
+                    """,
+                    token_hash,
+                    telegram_user_id,
+                    chat_id,
+                    sender.get("username"),
+                )
+            reply = (
+                "TGMate 通知已成功绑定。你可以在账户设置中随时解除绑定。"
+                if linked
+                else "绑定链接无效或已过期，请返回 TGMate 重新生成绑定链接。"
+            )
+        else:
+            reply = "请先在 TGMate 账户设置中生成 Telegram 通知绑定链接，再点击链接启动机器人。"
+    elif command == "/stop":
+        async with request.app.state.db_pool.acquire() as conn:
+            removed = await conn.fetchval(
+                "SELECT unlink_telegram_user($1)",
+                telegram_user_id,
+            )
+        reply = "TGMate 通知已关闭。" if removed else "当前没有绑定的 TGMate 通知。"
+    elif command in {"/help", "/start"}:
+        reply = "在 TGMate 账户设置中绑定通知，发送 /stop 可解除绑定。"
+
+    if reply:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{settings.platform_telegram_bot_token}/sendMessage",
+                    json={"chat_id": chat_id, "text": reply},
+                )
+        except httpx.HTTPError:
+            logger.warning("Could not send Telegram bot command response")
+    return {"ok": True}
 
 
 @router.put("/billing/notification-preferences")
