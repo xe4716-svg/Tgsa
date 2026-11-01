@@ -84,7 +84,7 @@ def provider_readiness(provider: str) -> tuple[bool, str | None]:
     elif provider == "USDT":
         # The TRON address allocator and confirmed-transfer watcher are a separate
         # service; an xpub alone is not enough to accept deposits safely.
-        ready = False
+        return False, "chain_watcher_not_enabled"
     else:
         return False, "unsupported_provider"
     return (True, None) if ready else (False, "provider_credentials_incomplete")
