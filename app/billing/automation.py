@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -149,6 +152,31 @@ async def _notify_user(
             dedupe_key[:160],
             title[:200],
             body,
+        )
+
+    telegram_linked = await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM tenant_telegram_notification_links
+            WHERE tenant_id = $1 AND user_id = $2
+        )
+        """,
+        tenant_id,
+        user_id,
+    )
+    if telegram_linked:
+        await conn.execute(
+            """
+            INSERT INTO telegram_notification_outbox (
+                tenant_id, user_id, dedupe_key, message_text
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (tenant_id, dedupe_key) DO NOTHING
+            """,
+            tenant_id,
+            user_id,
+            dedupe_key[:160],
+            (title + "\n\n" + body)[:4096],
         )
     return True
 
