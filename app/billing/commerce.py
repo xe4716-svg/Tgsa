@@ -499,7 +499,7 @@ async def purchase_membership(
                 current_subscription = quote["current_subscription"]
                 auto_renew = await conn.fetchrow(
                     """
-                    SELECT enabled, subscription_id
+                    SELECT enabled, subscription_id, user_id
                     FROM tenant_auto_renew_settings
                     WHERE tenant_id = $1
                     FOR UPDATE
@@ -511,8 +511,24 @@ async def purchase_membership(
                     or not auto_renew
                     or not auto_renew["enabled"]
                     or auto_renew["subscription_id"] != current_subscription["id"]
+                    or auto_renew["user_id"] != principal.user_id
                 ):
                     raise HTTPException(status_code=409, detail="AUTO_RENEW_DISABLED")
+                authorized_renewal_owner = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM tenant_memberships
+                        WHERE tenant_id = $1 AND user_id = $2
+                          AND role IN ('OWNER', 'ADMIN')
+                    )
+                    """,
+                    principal.tenant_id,
+                    principal.user_id,
+                )
+                if not authorized_renewal_owner:
+                    raise HTTPException(status_code=409, detail="AUTO_RENEW_DISABLED")
+
                 active_intent = await conn.fetchval(
                     """
                     SELECT EXISTS (
