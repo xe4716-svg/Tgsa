@@ -68,6 +68,8 @@
 - POST /admin/tenants/{tenant_id}/wallet/credits：人工核实顾客付款后，直接为租户钱包入账；不要求顾客先创建充值订单或上传付款截图。
 - GET /admin/billing/payment-methods：查看支付渠道配置和凭据就绪状态。
 - PUT /admin/billing/payment-methods/{provider}：启用/停用渠道并设置金额范围、排序和展示说明。
+- GET /admin/billing/tron-sweeps：查看全平台 TRC20 归集任务及异常状态。
+- POST /admin/billing/tron-sweeps：对指定充值地址发起人工归集；先向独立签名器询价，检查余额、TRX 资源和最高费用，再记录管理员和原因。
 
 支付渠道凭据只从部署环境变量/Secret Manager 读取，绝不通过管理 API 返回。新渠道默认关闭；即使后台打开，凭据不完整或生产回调 URL 非 HTTPS 时仍显示不可用。
 
