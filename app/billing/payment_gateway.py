@@ -56,6 +56,11 @@ def _decimal_minor(value: str | int | Decimal, currency: str) -> int:
 
 def provider_readiness(provider: str) -> tuple[bool, str | None]:
     provider = provider.upper()
+    if provider != "MANUAL" and settings.app_env.lower() == "production":
+        if not settings.public_api_base_url.startswith("https://"):
+            return False, "payment_callback_url_must_use_https"
+        if not settings.payment_return_url.startswith("https://"):
+            return False, "payment_return_url_must_use_https"
     if provider == "MANUAL":
         return True, None
     if provider == "STRIPE":
