@@ -104,7 +104,7 @@ CREATE INDEX idx_wallet_ledger_tenant_time
 CREATE TABLE subscription_terms (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    order_id UUID NOT NULL UNIQUE REFERENCES billing_orders(id),
+    order_id UUID NOT NULL UNIQUE,
     plan_id UUID NOT NULL REFERENCES membership_plans(id),
     plan_code_snapshot VARCHAR(40) NOT NULL,
     currency VARCHAR(8) NOT NULL
@@ -120,7 +120,9 @@ CREATE TABLE subscription_terms (
         CHECK (status IN ('ACTIVE', 'SUPERSEDED', 'EXPIRED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (ends_at > starts_at),
-    UNIQUE (tenant_id, id)
+    UNIQUE (tenant_id, id),
+    FOREIGN KEY (tenant_id, order_id)
+        REFERENCES billing_orders(tenant_id, id)
 );
 CREATE INDEX idx_subscription_terms_remaining
     ON subscription_terms(tenant_id, status, ends_at);
@@ -137,24 +139,29 @@ CREATE TABLE platform_audit_logs (
 CREATE INDEX idx_platform_audit_time ON platform_audit_logs(created_at DESC);
 
 -- Tenant-owned commerce records are isolated using the same transaction-local tenant context.
-DO $$
-DECLARE
-    tbl TEXT;
-BEGIN
-    FOREACH tbl IN ARRAY ARRAY[
-        'tenant_wallet_accounts', 'billing_orders',
-        'wallet_ledger_entries', 'subscription_terms'
-    ]
-    LOOP
-        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
-        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);
-        EXECUTE format(
-            'CREATE POLICY tenant_scope ON %I USING (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::uuid) WITH CHECK (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::uuid)',
-            tbl
-        );
-    END LOOP;
-END
-$$;
+ALTER TABLE tenant_wallet_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_wallet_accounts FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_scope ON tenant_wallet_accounts
+USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+
+ALTER TABLE billing_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing_orders FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_scope ON billing_orders
+USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+
+ALTER TABLE wallet_ledger_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wallet_ledger_entries FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_scope ON wallet_ledger_entries
+USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+
+ALTER TABLE subscription_terms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscription_terms FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_scope ON subscription_terms
+USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
 
 GRANT SELECT ON membership_plan_prices TO tgs_runtime;
 GRANT INSERT, UPDATE ON membership_plan_prices TO tgs_runtime;
