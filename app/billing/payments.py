@@ -328,6 +328,9 @@ async def manually_queue_tron_sweep(
                         amount_minor = $7, max_fee_sun = $8, fee_sun = $9,
                         status = 'PENDING', attempt_count = 0,
                         next_attempt_at = NOW(), last_error_code = NULL,
+                        txid = NULL, signer_reference = NULL,
+                        submitted_at = NULL, confirmed_at = NULL,
+                        last_checked_at = NULL,
                         requested_by = $10, reason = $11, updated_at = NOW()
                     WHERE tenant_id = $1 AND id = $2
                     RETURNING id, status, amount_minor, fee_sun
