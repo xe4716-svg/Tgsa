@@ -54,7 +54,7 @@ VALUES
     ('WECHAT', FALSE, '微信支付', '["CNY"]'::jsonb, 100, 100000000, 20, ''),
     ('STRIPE', FALSE, '信用卡', '["USD","CNY"]'::jsonb, 100, 100000000, 30, ''),
     ('EASYPAY', FALSE, '易支付', '["CNY"]'::jsonb, 100, 100000000, 40, ''),
-    ('USDT', FALSE, 'USDT (TRC20)', '["USDT"]'::jsonb, 10000000, 100000000000, 50, '')
+    ('USDT', FALSE, 'USDT (TRC20)', '["USDT"]'::jsonb, 1000000, 100000000000, 50, '')
 ON CONFLICT (provider) DO NOTHING;
 
 CREATE TABLE wallet_topup_orders (
