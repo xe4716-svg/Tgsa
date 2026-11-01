@@ -10,6 +10,9 @@ CREATE TABLE billing_automation_settings (
     id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     renewal_advance_days INTEGER NOT NULL DEFAULT 3
         CHECK (renewal_advance_days IN (1, 3, 7)),
+    reminder_days JSONB NOT NULL DEFAULT '[7, 3, 1, 0]'::jsonb
+        CHECK (jsonb_typeof(reminder_days) = 'array'
+               AND jsonb_array_length(reminder_days) <= 12),
     retry_interval_minutes INTEGER NOT NULL DEFAULT 60
         CHECK (retry_interval_minutes BETWEEN 5 AND 1440),
     max_technical_retries INTEGER NOT NULL DEFAULT 3
@@ -25,6 +28,19 @@ CREATE TABLE billing_automation_settings (
 INSERT INTO billing_automation_settings (id) VALUES (1)
 ON CONFLICT (id) DO NOTHING;
 
+CREATE TABLE tenant_billing_preferences (
+    tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+    timezone VARCHAR(80) NOT NULL DEFAULT 'UTC',
+    timezone_confirmed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    email_notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    telegram_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE tenant_subscriptions
+    ADD COLUMN expiry_notified_at TIMESTAMPTZ;
+
 CREATE TABLE tenant_auto_renew_settings (
     tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
     subscription_id UUID NOT NULL,
@@ -34,6 +50,8 @@ CREATE TABLE tenant_auto_renew_settings (
     duration_days INTEGER NOT NULL CHECK (duration_days BETWEEN 1 AND 3650),
     timezone VARCHAR(80) NOT NULL DEFAULT 'UTC',
     enabled_at TIMESTAMPTZ,
+    last_price_minor BIGINT CHECK (last_price_minor IS NULL OR last_price_minor >= 0),
+    last_price_version INTEGER CHECK (last_price_version IS NULL OR last_price_version > 0),
     updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (tenant_id, subscription_id)
@@ -109,6 +127,7 @@ CREATE TABLE billing_email_outbox (
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
         CHECK (status IN ('PENDING', 'PROCESSING', 'SENT', 'FAILED')),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts BETWEEN 1 AND 10),
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_error_code VARCHAR(80),
     sent_at TIMESTAMPTZ,
@@ -119,6 +138,12 @@ CREATE TABLE billing_email_outbox (
 CREATE INDEX idx_billing_email_outbox_due
     ON billing_email_outbox(status, next_attempt_at, created_at)
     WHERE status IN ('PENDING', 'PROCESSING');
+
+ALTER TABLE tenant_billing_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_billing_preferences FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_scope ON tenant_billing_preferences
+USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
 
 ALTER TABLE tenant_auto_renew_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_auto_renew_settings FORCE ROW LEVEL SECURITY;
@@ -287,12 +312,13 @@ AS $email$
     WITH due AS (
         SELECT o.id
         FROM billing_email_outbox o
-        WHERE (
+        WHERE o.attempt_count < o.max_attempts
+          AND ((
             o.status = 'PENDING' AND o.next_attempt_at <= NOW()
-        ) OR (
+          ) OR (
             o.status = 'PROCESSING'
             AND o.updated_at < NOW() - INTERVAL '5 minutes'
-        )
+          ))
         ORDER BY o.next_attempt_at, o.created_at
         FOR UPDATE SKIP LOCKED
         LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 200)
@@ -317,6 +343,7 @@ REVOKE ALL ON FUNCTION claim_due_billing_emails(INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION claim_due_billing_emails(INTEGER) TO tgs_runtime;
 
 GRANT SELECT, INSERT, UPDATE ON billing_automation_settings TO tgs_runtime;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_billing_preferences TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_auto_renew_settings TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON subscription_renewal_intents TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON tenant_notifications TO tgs_runtime;
