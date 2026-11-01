@@ -8,6 +8,7 @@ from redis.asyncio import Redis
 from app.auth.router import router as auth_router
 from app.billing.router import router as billing_router
 from app.billing.commerce import router as commerce_router
+from app.billing.automation import router as billing_automation_router, run_billing_automation
 from app.billing.payments import router as payments_router
 from app.billing.tron_watcher import run_tron_watcher
 from app.config import settings, validate_startup_settings
@@ -28,6 +29,10 @@ async def lifespan(app: FastAPI):
     )
     app.state.tron_watcher_stop = asyncio.Event()
     app.state.tron_watcher_task = None
+    app.state.billing_automation_stop = asyncio.Event()
+    app.state.billing_automation_task = asyncio.create_task(
+        run_billing_automation(app.state.db_pool, app.state.billing_automation_stop)
+    )
     if settings.tron_watcher_enabled:
         app.state.tron_watcher_task = asyncio.create_task(
             run_tron_watcher(app.state.db_pool, app.state.tron_watcher_stop)
@@ -35,6 +40,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        app.state.billing_automation_stop.set()
+        await app.state.billing_automation_task
         if app.state.tron_watcher_task:
             app.state.tron_watcher_stop.set()
             await app.state.tron_watcher_task
@@ -52,6 +59,7 @@ app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(commerce_router)
 app.include_router(payments_router)
+app.include_router(billing_automation_router)
 
 
 @app.get("/")
@@ -60,6 +68,6 @@ async def root():
         "service": settings.app_name,
         "version": "1.0.0-foundation",
         "status": "running",
-        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration", "tron_usdt_watcher"],
+        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration", "tron_usdt_watcher", "auto_renewal", "billing_notifications"],
         "note": "Telegram integrations are not enabled until deployment secrets and integration tests are complete.",
     }
