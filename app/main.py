@@ -7,6 +7,7 @@ from redis.asyncio import Redis
 from app.auth.router import router as auth_router
 from app.billing.router import router as billing_router
 from app.billing.commerce import router as commerce_router
+from app.billing.payments import router as payments_router
 from app.config import settings, validate_startup_settings
 from app.health import router as health_router
 
@@ -39,6 +40,7 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(commerce_router)
+app.include_router(payments_router)
 
 
 @app.get("/")
@@ -47,6 +49,6 @@ async def root():
         "service": settings.app_name,
         "version": "1.0.0-foundation",
         "status": "running",
-        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce"],
+        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration"],
         "note": "Telegram integrations are not enabled until deployment secrets and integration tests are complete.",
     }
