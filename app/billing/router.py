@@ -274,6 +274,19 @@ async def assign_subscription(
                 )
             else:
                 if current:
+                    # A manual plan replacement consumes the old paid term;
+                    # it must not later be counted again as upgrade credit.
+                    await conn.execute(
+                        """
+                        UPDATE subscription_terms
+                        SET status = 'SUPERSEDED'
+                        WHERE tenant_id = $1
+                          AND status = 'ACTIVE'
+                          AND ends_at > $2
+                        """,
+                        tenant_id,
+                        db_now,
+                    )
                     await conn.execute(
                         """
                         UPDATE tenant_subscriptions
