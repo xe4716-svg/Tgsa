@@ -413,59 +413,97 @@ async def create_wallet_topup(
     if order["payment_url"]:
         return _topup_response(order)
 
-    try:
-        provider_result = await _create_provider_payment(
-            provider,
+    # A session-level advisory lock prevents two concurrent retries from creating
+    # separate provider sessions for the same tenant idempotency key.
+    async with request.app.state.db_pool.acquire() as provider_conn:
+        lock_key = await provider_conn.fetchval(
+            "SELECT hashtextextended($1, 0)",
             order["order_no"],
-            payload.amount_minor,
-            currency,
-            channel,
-            request,
         )
-    except (PaymentGatewayError, httpx.HTTPError) as exc:
-        async with request.app.state.db_pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(
+        await provider_conn.fetchval("SELECT pg_advisory_lock($1)", lock_key)
+        try:
+            async with provider_conn.transaction():
+                await provider_conn.execute(
                     "SELECT set_config('app.tenant_id', $1, true)",
                     str(principal.tenant_id),
                 )
-                await conn.execute(
+                current_order = await provider_conn.fetchrow(
                     """
-                    UPDATE wallet_topup_orders
-                    SET updated_at = NOW(),
-                        metadata = metadata || $3::jsonb
-                    WHERE tenant_id = $1 AND id = $2 AND status = 'PENDING'
+                    SELECT * FROM wallet_topup_orders
+                    WHERE tenant_id = $1 AND id = $2
                     """,
                     principal.tenant_id,
                     order["id"],
-                    json.dumps({"provider_error": type(exc).__name__}),
                 )
-        raise HTTPException(status_code=502, detail="Payment provider could not create a payment session") from exc
+            if not current_order:
+                raise HTTPException(status_code=404, detail="Top-up order not found")
+            if current_order["payment_url"] or current_order["status"] != "PENDING":
+                return _topup_response(current_order)
 
-    async with request.app.state.db_pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "SELECT set_config('app.tenant_id', $1, true)",
-                str(principal.tenant_id),
-            )
-            updated = await conn.fetchrow(
-                """
-                UPDATE wallet_topup_orders
-                SET payment_url = $3, qr_code_url = $4,
-                    metadata = metadata || $5::jsonb, updated_at = NOW()
-                WHERE tenant_id = $1 AND id = $2 AND status = 'PENDING'
-                RETURNING *
-                """,
-                principal.tenant_id,
-                order["id"],
-                provider_result.get("payment_url"),
-                provider_result.get("qr_code_url"),
-                json.dumps({"provider_reference": provider_result.get("provider_reference")}),
-            )
-    if not updated:
-        raise HTTPException(status_code=409, detail="Top-up order changed while payment was being prepared")
-    return _topup_response(updated)
+            try:
+                provider_result = await _create_provider_payment(
+                    provider,
+                    current_order["order_no"],
+                    payload.amount_minor,
+                    currency,
+                    channel,
+                    request,
+                )
+            except (PaymentGatewayError, httpx.HTTPError, ValueError) as exc:
+                async with provider_conn.transaction():
+                    await provider_conn.execute(
+                        "SELECT set_config('app.tenant_id', $1, true)",
+                        str(principal.tenant_id),
+                    )
+                    await provider_conn.execute(
+                        """
+                        UPDATE wallet_topup_orders
+                        SET updated_at = NOW(),
+                            metadata = metadata || $3::jsonb
+                        WHERE tenant_id = $1 AND id = $2 AND status = 'PENDING'
+                        """,
+                        principal.tenant_id,
+                        order["id"],
+                        json.dumps({"provider_error": type(exc).__name__}),
+                    )
+                raise HTTPException(
+                    status_code=502,
+                    detail="Payment provider could not create a payment session",
+                ) from exc
 
+            async with provider_conn.transaction():
+                await provider_conn.execute(
+                    "SELECT set_config('app.tenant_id', $1, true)",
+                    str(principal.tenant_id),
+                )
+                updated = await provider_conn.fetchrow(
+                    """
+                    UPDATE wallet_topup_orders
+                    SET payment_url = $3, qr_code_url = $4,
+                        metadata = metadata || $5::jsonb, updated_at = NOW()
+                    WHERE tenant_id = $1 AND id = $2 AND status = 'PENDING'
+                    RETURNING *
+                    """,
+                    principal.tenant_id,
+                    order["id"],
+                    provider_result.get("payment_url"),
+                    provider_result.get("qr_code_url"),
+                    json.dumps({"provider_reference": provider_result.get("provider_reference")}),
+                )
+                if not updated:
+                    updated = await provider_conn.fetchrow(
+                        """
+                        SELECT * FROM wallet_topup_orders
+                        WHERE tenant_id = $1 AND id = $2
+                        """,
+                        principal.tenant_id,
+                        order["id"],
+                    )
+            if not updated:
+                raise HTTPException(status_code=409, detail="Top-up order changed while payment was being prepared")
+            return _topup_response(updated)
+        finally:
+            await provider_conn.fetchval("SELECT pg_advisory_unlock($1)", lock_key)
 
 
 @router.get("/billing/wallet/topups")
