@@ -77,6 +77,15 @@ def _format_amount(currency: str, amount_minor: int) -> str:
     return f"{currency} {whole:,}.{fraction:0{decimals}d}"
 
 
+def _json_value(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+    return value if value is not None else {}
+
+
 def reminder_bucket(expires_at: datetime, now: datetime, reminder_days: list[int]) -> int | None:
     """Return the configured reminder bucket whose one-day window contains expiry."""
     if expires_at.tzinfo is None:
@@ -487,7 +496,7 @@ async def list_billing_notifications(
                 "event_type": row["event_type"],
                 "title": row["title"],
                 "body": row["body"],
-                "payload": row["payload"] or {},
+                "payload": _json_value(row["payload"]),
                 "read_at": row["read_at"],
                 "created_at": row["created_at"],
             }
@@ -531,7 +540,9 @@ async def get_billing_automation_settings(
         row = await conn.fetchrow("SELECT * FROM billing_automation_settings WHERE id = 1")
     if not row:
         raise HTTPException(status_code=503, detail="Billing automation settings are not initialized")
-    return dict(row)
+    result = dict(row)
+    result["reminder_days"] = _json_value(result.get("reminder_days"))
+    return result
 
 
 @router.put("/admin/billing/automation-settings")
@@ -1017,7 +1028,8 @@ async def _process_expiry_reminders(pool) -> None:
         config = await conn.fetchrow("SELECT reminder_days FROM billing_automation_settings WHERE id = 1")
         rows = await conn.fetch("SELECT * FROM list_billing_reminder_recipients(5000)")
         now = await conn.fetchval("SELECT NOW()")
-    reminder_days = [int(value) for value in (config["reminder_days"] if config else [7, 3, 1, 0])]
+    configured_days = _json_value(config["reminder_days"]) if config else [7, 3, 1, 0]
+    reminder_days = [int(value) for value in configured_days]
     grouped: dict[tuple[UUID, UUID], dict] = {}
     for row in rows:
         key = (row["tenant_id"], row["subscription_id"])
