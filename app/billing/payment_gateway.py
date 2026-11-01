@@ -206,6 +206,12 @@ def verify_wechat_notification(
         raise PaymentVerificationError("WeChat Pay callback verification/decryption failed") from exc
     if not isinstance(transaction, dict):
         raise PaymentVerificationError("WeChat Pay transaction payload is invalid")
+    expected_mchid = getattr(settings, "wechat_mchid", None)
+    expected_appid = getattr(settings, "wechat_appid", None)
+    if expected_mchid and transaction.get("mchid") != expected_mchid:
+        raise PaymentVerificationError("WeChat Pay merchant ID does not match")
+    if expected_appid and transaction.get("appid") != expected_appid:
+        raise PaymentVerificationError("WeChat Pay app ID does not match")
     return {"event_id": envelope.get("id"), "transaction": transaction}
 
 
@@ -226,6 +232,9 @@ def verify_easypay_notification(params: Mapping[str, str]) -> dict[str, Any]:
     signature = params.get("sign", "")
     if not signature or params.get("sign_type", "MD5").upper() != "MD5":
         raise PaymentVerificationError("Epay-compatible callback signature is missing")
+    expected_pid = getattr(settings, "easypay_pid", None)
+    if expected_pid and params.get("pid") != expected_pid:
+        raise PaymentVerificationError("Epay-compatible merchant PID does not match")
     expected = hashlib.md5(
         _easypay_signing_content(params, key).encode("utf-8")
     ).hexdigest()
