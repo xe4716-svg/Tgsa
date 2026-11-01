@@ -660,6 +660,13 @@ async def _process_renewal_intent(pool, intent) -> None:
                        s.status AS subscription_status, s.expires_at,
                        s.plan_id AS current_plan_id,
                        p.code AS current_plan_code,
+                       EXISTS (
+                           SELECT 1
+                           FROM tenant_memberships tm
+                           WHERE tm.tenant_id = i.tenant_id
+                             AND tm.user_id = i.user_id
+                             AND tm.role IN ('OWNER', 'ADMIN')
+                       ) AS user_authorized,
                        CASE WHEN u.email_verified_at IS NOT NULL THEN u.email ELSE NULL END AS email
                 FROM subscription_renewal_intents i
                 LEFT JOIN tenant_auto_renew_settings ar
@@ -677,6 +684,7 @@ async def _process_renewal_intent(pool, intent) -> None:
                 return
             if (
                 not state["auto_enabled"]
+                or not state["user_authorized"]
                 or state["configured_subscription_id"] != state["subscription_id"]
             ):
                 await conn.execute(
