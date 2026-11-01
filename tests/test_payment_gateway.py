@@ -207,4 +207,4 @@ def test_usdt_provider_is_not_reported_ready_without_chain_watcher(monkeypatch):
     ))
     ready, reason = gateway.provider_readiness("USDT")
     assert ready is False
-    assert reason == "unsupported_provider"
+    assert reason == "chain_watcher_not_enabled"
