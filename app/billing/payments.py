@@ -272,7 +272,7 @@ async def manually_queue_tron_sweep(
         quote = response.json()
         available_amount = int(quote["available_amount_minor"])
         estimated_fee = int(quote["estimated_fee_sun"])
-        can_sweep = bool(quote.get("can_sweep", True))
+        can_sweep = quote.get("can_sweep") is True
     except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
         raise HTTPException(status_code=502, detail="TRC20 signer could not quote the sweep") from exc
 
