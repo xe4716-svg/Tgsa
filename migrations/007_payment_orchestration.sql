@@ -326,6 +326,72 @@ $$;
 REVOKE ALL ON FUNCTION resolve_wallet_topup_order(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION resolve_wallet_topup_order(TEXT) TO tgs_runtime;
 
+CREATE OR REPLACE FUNCTION resolve_tron_deposit_order(p_order_no TEXT)
+RETURNS TABLE (
+    id UUID,
+    tenant_id UUID,
+    provider VARCHAR,
+    currency VARCHAR,
+    status VARCHAR,
+    deposit_address VARCHAR,
+    derivation_index BIGINT,
+    amount_minor BIGINT
+)
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $deposit$
+    SELECT o.id, o.tenant_id, o.provider, o.currency, o.status,
+           o.deposit_address, o.derivation_index, o.amount_minor
+    FROM wallet_topup_orders o
+    WHERE o.order_no = p_order_no
+      AND o.provider = 'USDT'
+    LIMIT 1
+$deposit$;
+REVOKE ALL ON FUNCTION resolve_tron_deposit_order(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION resolve_tron_deposit_order(TEXT) TO tgs_runtime;
+
+CREATE OR REPLACE FUNCTION list_tron_sweep_jobs(
+    p_status TEXT DEFAULT NULL,
+    p_limit INTEGER DEFAULT 100
+)
+RETURNS TABLE (
+    id UUID,
+    tenant_id UUID,
+    order_no VARCHAR,
+    source_address VARCHAR,
+    destination_address VARCHAR,
+    amount_minor BIGINT,
+    max_fee_sun BIGINT,
+    fee_sun BIGINT,
+    status VARCHAR,
+    txid VARCHAR,
+    attempt_count INTEGER,
+    last_error_code VARCHAR,
+    reason VARCHAR,
+    created_at TIMESTAMPTZ,
+    confirmed_at TIMESTAMPTZ
+)
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $jobs$
+    SELECT j.id, j.tenant_id, o.order_no, j.source_address,
+           j.destination_address, j.amount_minor, j.max_fee_sun,
+           j.fee_sun, j.status, j.txid, j.attempt_count,
+           j.last_error_code, j.reason, j.created_at, j.confirmed_at
+    FROM tron_sweep_jobs j
+    JOIN wallet_topup_orders o
+      ON o.tenant_id = j.tenant_id AND o.id = j.topup_order_id
+    WHERE p_status IS NULL OR j.status = p_status
+    ORDER BY j.created_at DESC
+    LIMIT LEAST(GREATEST(COALESCE(p_limit, 100), 1), 500)
+$jobs$;
+REVOKE ALL ON FUNCTION list_tron_sweep_jobs(TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION list_tron_sweep_jobs(TEXT, INTEGER) TO tgs_runtime;
+
 GRANT SELECT, INSERT, UPDATE ON payment_provider_configs TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON wallet_topup_orders TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON tron_sweep_jobs TO tgs_runtime;
