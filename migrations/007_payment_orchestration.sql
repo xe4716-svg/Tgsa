@@ -130,7 +130,7 @@ LANGUAGE SQL
 VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_temp
-AS $
+AS $tron$
     WITH due AS (
         SELECT o.id
         FROM wallet_topup_orders o
@@ -158,7 +158,7 @@ AS $
     WHERE o.id = due.id
     RETURNING o.id, o.tenant_id, o.order_no, o.deposit_address,
               o.amount_minor, o.status
-$;
+$tron$;
 
 CREATE TABLE payment_webhook_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
