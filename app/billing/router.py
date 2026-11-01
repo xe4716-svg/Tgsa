@@ -329,6 +329,33 @@ async def assign_subscription(
                     expires_at,
                 )
 
+            keep_auto_renew = bool(
+                current
+                and current["plan_id"] == plan["id"]
+                and current["expires_at"] is not None
+                and current["expires_at"] > db_now
+            )
+            if not keep_auto_renew:
+                await conn.execute(
+                    """
+                    UPDATE tenant_auto_renew_settings
+                    SET enabled = FALSE, updated_at = NOW()
+                    WHERE tenant_id = $1
+                    """,
+                    tenant_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE subscription_renewal_intents
+                    SET status = 'CANCELED',
+                        last_error_code = 'MANUAL_SUBSCRIPTION_CHANGE',
+                        updated_at = NOW()
+                    WHERE tenant_id = $1
+                      AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                    """,
+                    tenant_id,
+                )
+
             await conn.execute(
                 """
                 INSERT INTO audit_logs (
