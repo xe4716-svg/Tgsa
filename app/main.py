@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 
 import asyncpg
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from app.auth.router import router as auth_router
 from app.billing.router import router as billing_router
 from app.billing.commerce import router as commerce_router
 from app.billing.payments import router as payments_router
+from app.billing.tron_watcher import run_tron_watcher
 from app.config import settings, validate_startup_settings
 from app.health import router as health_router
 
@@ -24,9 +26,18 @@ async def lifespan(app: FastAPI):
         socket_connect_timeout=3,
         socket_timeout=3,
     )
+    app.state.tron_watcher_stop = asyncio.Event()
+    app.state.tron_watcher_task = None
+    if settings.tron_watcher_enabled:
+        app.state.tron_watcher_task = asyncio.create_task(
+            run_tron_watcher(app.state.db_pool, app.state.tron_watcher_stop)
+        )
     try:
         yield
     finally:
+        if app.state.tron_watcher_task:
+            app.state.tron_watcher_stop.set()
+            await app.state.tron_watcher_task
         await app.state.redis.aclose()
         await app.state.db_pool.close()
 
@@ -49,6 +60,6 @@ async def root():
         "service": settings.app_name,
         "version": "1.0.0-foundation",
         "status": "running",
-        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration"],
+        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration", "tron_usdt_watcher"],
         "note": "Telegram integrations are not enabled until deployment secrets and integration tests are complete.",
     }
