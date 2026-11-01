@@ -74,6 +74,8 @@ def _topup_response(row) -> dict:
         "status": row["status"],
         "payment_url": row["payment_url"],
         "qr_code_url": row["qr_code_url"],
+        "deposit_address": row["deposit_address"],
+        "derivation_index": row["derivation_index"],
         "expires_at": row["expires_at"],
         "paid_at": row["paid_at"],
         "created_at": row["created_at"],
@@ -276,19 +278,16 @@ async def create_wallet_topup(
 ):
     provider = payload.provider.strip().upper()
     currency = payload.currency.strip().upper()
-    if provider not in {"STRIPE", "ALIPAY", "WECHAT", "EASYPAY"}:
+    if provider not in {"STRIPE", "ALIPAY", "WECHAT", "EASYPAY", "USDT"}:
         if provider == "MANUAL":
             raise HTTPException(
                 status_code=409,
                 detail="For manual payment, contact platform support; an administrator will credit the wallet after verifying receipt.",
             )
-        if provider == "USDT":
-            raise HTTPException(
-                status_code=503,
-                detail="TRC20 deposit address allocation and confirmed-chain monitoring are not enabled yet.",
-            )
         raise HTTPException(status_code=422, detail="Unsupported payment provider")
-    if currency not in {"CNY", "USD"}:
+    if provider == "USDT" and currency != "USDT":
+        raise HTTPException(status_code=422, detail="TRC20 deposits must use USDT")
+    if provider != "USDT" and currency not in {"CNY", "USD"}:
         raise HTTPException(status_code=422, detail="This payment provider does not support the selected currency")
     if provider in {"ALIPAY", "WECHAT", "EASYPAY"} and currency != "CNY":
         raise HTTPException(status_code=422, detail="Selected provider supports CNY only")
@@ -351,30 +350,66 @@ async def create_wallet_topup(
                 order = existing
             else:
                 order_no = uuid4().hex
-                order = await conn.fetchrow(
-                    """
-                    INSERT INTO wallet_topup_orders (
-                        tenant_id, order_no, provider, idempotency_key,
-                        request_fingerprint, currency, amount_minor,
-                        created_by, expires_at, metadata
-                    )
-                    VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8,
-                        NOW() + INTERVAL '30 minutes', $9::jsonb
-                    )
-                    RETURNING *
-                    """,
-                    principal.tenant_id,
-                    order_no,
-                    provider,
-                    payload.idempotency_key,
-                    fingerprint,
-                    currency,
-                    payload.amount_minor,
-                    principal.user_id,
-                    json.dumps({"channel": channel} if channel else {}),
-                )
+                if provider == "USDT":
+                    from app.billing.tron_watcher import derive_tron_deposit_address
+                    from app.config import settings
 
+                    derivation_index = await conn.fetchval(
+                        "SELECT nextval('tron_deposit_index_seq')"
+                    )
+                    deposit_address = derive_tron_deposit_address(
+                        settings.tron_account_xpub, int(derivation_index)
+                    )
+                    order = await conn.fetchrow(
+                        """
+                        INSERT INTO wallet_topup_orders (
+                            tenant_id, order_no, provider, idempotency_key,
+                            request_fingerprint, currency, amount_minor,
+                            created_by, expires_at, deposit_address,
+                            derivation_index, metadata
+                        )
+                        VALUES (
+                            $1, $2, 'USDT', $3, $4, 'USDT', $5, $6,
+                            NOW() + INTERVAL '24 hours', $7, $8, '{}'::jsonb
+                        )
+                        RETURNING *
+                        """,
+                        principal.tenant_id,
+                        order_no,
+                        payload.idempotency_key,
+                        fingerprint,
+                        payload.amount_minor,
+                        principal.user_id,
+                        deposit_address,
+                        derivation_index,
+                    )
+                else:
+                    order = await conn.fetchrow(
+                        """
+                        INSERT INTO wallet_topup_orders (
+                            tenant_id, order_no, provider, idempotency_key,
+                            request_fingerprint, currency, amount_minor,
+                            created_by, expires_at, metadata
+                        )
+                        VALUES (
+                            $1, $2, $3, $4, $5, $6, $7, $8,
+                            NOW() + INTERVAL '30 minutes', $9::jsonb
+                        )
+                        RETURNING *
+                        """,
+                        principal.tenant_id,
+                        order_no,
+                        provider,
+                        payload.idempotency_key,
+                        fingerprint,
+                        currency,
+                        payload.amount_minor,
+                        principal.user_id,
+                        json.dumps({"channel": channel} if channel else {}),
+                    )
+
+    if provider == "USDT":
+        return _topup_response(order)
     if order["payment_url"]:
         return _topup_response(order)
 
