@@ -469,6 +469,18 @@ async def update_billing_notification_preferences(
                 principal.tenant_id,
                 timezone_name,
             )
+            if not payload.email_notifications_enabled:
+                await conn.execute(
+                    """
+                    UPDATE billing_email_outbox
+                    SET status = 'FAILED',
+                        last_error_code = 'EMAIL_NOTIFICATIONS_DISABLED',
+                        updated_at = NOW()
+                    WHERE tenant_id = $1
+                      AND status IN ('PENDING', 'PROCESSING')
+                    """,
+                    principal.tenant_id,
+                )
     return {
         "timezone": timezone_name,
         "email_notifications_enabled": payload.email_notifications_enabled,
