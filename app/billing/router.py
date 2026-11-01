@@ -224,34 +224,98 @@ async def assign_subscription(
             if not tenant:
                 raise HTTPException(status_code=404, detail="Tenant not found")
 
-            await conn.execute(
+            db_now = await conn.fetchval("SELECT NOW()")
+            current = await conn.fetchrow(
                 """
-                UPDATE tenant_subscriptions
-                SET status = 'CANCELED', updated_at = NOW()
-                WHERE tenant_id = $1
-                  AND status IN ('ACTIVE', 'TRIALING', 'PAST_DUE')
+                SELECT s.id, s.plan_id, s.starts_at, s.expires_at,
+                       s.status, p.code AS current_plan_code
+                FROM tenant_subscriptions s
+                JOIN membership_plans p ON p.id = s.plan_id
+                WHERE s.tenant_id = $1
+                  AND s.status IN ('ACTIVE', 'TRIALING', 'PAST_DUE')
+                ORDER BY s.starts_at DESC
+                LIMIT 1
+                FOR UPDATE OF s
                 """,
                 tenant_id,
             )
-            starts_at = datetime.now(timezone.utc)
-            expires_at = (
-                starts_at + timedelta(days=payload.duration_days)
-                if payload.duration_days is not None
-                else None
-            )
-            await conn.execute(
-                """
-                INSERT INTO tenant_subscriptions (
-                    tenant_id, plan_id, status, starts_at, expires_at,
-                    billing_source
+
+            if current and current["plan_id"] == plan["id"]:
+                # Same-tier manual renewal extends from the existing expiry.
+                # An indefinite subscription must never be shortened by a 30-day default.
+                if current["expires_at"] is None:
+                    starts_at = current["starts_at"]
+                    expires_at = None
+                elif current["expires_at"] > db_now:
+                    starts_at = current["starts_at"]
+                    expires_at = (
+                        current["expires_at"] + timedelta(days=payload.duration_days)
+                        if payload.duration_days is not None
+                        else None
+                    )
+                else:
+                    starts_at = db_now
+                    expires_at = (
+                        db_now + timedelta(days=payload.duration_days)
+                        if payload.duration_days is not None
+                        else None
+                    )
+                await conn.execute(
+                    """
+                    UPDATE tenant_subscriptions
+                    SET status = 'ACTIVE', starts_at = $2, expires_at = $3,
+                        billing_source = 'MANUAL', updated_at = NOW()
+                    WHERE id = $1 AND tenant_id = $4
+                    """,
+                    current["id"],
+                    starts_at,
+                    expires_at,
+                    tenant_id,
                 )
-                VALUES ($1, $2, 'ACTIVE', $3, $4, 'MANUAL')
-                """,
-                tenant_id,
-                plan["id"],
-                starts_at,
-                expires_at,
-            )
+            else:
+                if current:
+                    await conn.execute(
+                        """
+                        UPDATE tenant_subscriptions
+                        SET status = 'SUPERSEDED', updated_at = NOW()
+                        WHERE id = $1 AND tenant_id = $2
+                        """,
+                        current["id"],
+                        tenant_id,
+                    )
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE tenant_subscriptions
+                        SET status = 'EXPIRED', updated_at = NOW()
+                        WHERE tenant_id = $1
+                          AND status IN ('ACTIVE', 'TRIALING', 'PAST_DUE')
+                          AND expires_at IS NOT NULL
+                          AND expires_at <= $2
+                        """,
+                        tenant_id,
+                        db_now,
+                    )
+                starts_at = db_now
+                expires_at = (
+                    db_now + timedelta(days=payload.duration_days)
+                    if payload.duration_days is not None
+                    else None
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO tenant_subscriptions (
+                        tenant_id, plan_id, status, starts_at, expires_at,
+                        billing_source
+                    )
+                    VALUES ($1, $2, 'ACTIVE', $3, $4, 'MANUAL')
+                    """,
+                    tenant_id,
+                    plan["id"],
+                    starts_at,
+                    expires_at,
+                )
+
             await conn.execute(
                 """
                 INSERT INTO audit_logs (
@@ -266,6 +330,10 @@ async def assign_subscription(
                 json.dumps({
                     "plan_code": plan["code"],
                     "duration_days": payload.duration_days,
+                    "previous_plan_code": current["current_plan_code"] if current else None,
+                    "previous_expires_at": current["expires_at"] if current else None,
+                    "effective_start_at": starts_at.isoformat(),
+                    "effective_end_at": expires_at.isoformat() if expires_at else None,
                 }),
             )
     return {
@@ -273,6 +341,7 @@ async def assign_subscription(
         "tenant_id": str(tenant_id),
         "plan_code": plan["code"],
         "plan_name": plan["name"],
+        "starts_at": starts_at,
         "expires_at": expires_at,
     }
 
