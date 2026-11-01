@@ -240,7 +240,25 @@ BEGIN
         cfg.max_technical_retries
     FROM candidates c
     CROSS JOIN billing_automation_settings cfg
-    ON CONFLICT (tenant_id, subscription_id, renewal_cycle_key) DO NOTHING;
+    ON CONFLICT (tenant_id, subscription_id, renewal_cycle_key)
+    DO UPDATE SET
+        plan_id = EXCLUDED.plan_id,
+        plan_code_snapshot = EXCLUDED.plan_code_snapshot,
+        duration_days = EXCLUDED.duration_days,
+        currency = EXCLUDED.currency,
+        amount_minor = EXCLUDED.amount_minor,
+        price_version = EXCLUDED.price_version,
+        request_fingerprint = EXCLUDED.request_fingerprint,
+        status = 'PENDING',
+        idempotency_key = EXCLUDED.idempotency_key,
+        attempt_count = 0,
+        max_attempts = EXCLUDED.max_attempts,
+        next_attempt_at = NOW(),
+        last_error_code = NULL,
+        price_notice_sent_at = NULL,
+        updated_at = NOW()
+    WHERE subscription_renewal_intents.status IN ('CANCELED', 'FAILED')
+      AND subscription_renewal_intents.paid_order_id IS NULL;
 
     GET DIAGNOSTICS inserted_count = ROW_COUNT;
     RETURN inserted_count;
