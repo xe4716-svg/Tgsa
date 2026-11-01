@@ -1068,6 +1068,27 @@ async def _process_expiry_reminders(pool) -> None:
                         tenant_id,
                         subscription_id,
                     )
+                    await tenant_conn.execute(
+                        """
+                        UPDATE tenant_auto_renew_settings
+                        SET enabled = FALSE, updated_at = NOW()
+                        WHERE tenant_id = $1 AND subscription_id = $2
+                        """,
+                        tenant_id,
+                        subscription_id,
+                    )
+                    await tenant_conn.execute(
+                        """
+                        UPDATE subscription_renewal_intents
+                        SET status = 'EXPIRED',
+                            last_error_code = 'SUBSCRIPTION_EXPIRED',
+                            updated_at = NOW()
+                        WHERE tenant_id = $1 AND subscription_id = $2
+                          AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                        """,
+                        tenant_id,
+                        subscription_id,
+                    )
                     event_type = "SUBSCRIPTION_EXPIRED"
                     title = "会员服务已到期"
                     body = (
