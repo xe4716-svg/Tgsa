@@ -85,7 +85,20 @@ TRON_ACCOUNT_XPUB 只能是 TRON BIP44 账户层 m/44'/195'/0' 或外部链层 m
 
 Watcher 通过 TronGrid 的 GET /v1/accounts/{address}/transactions/trc20 查询 only_confirmed=true 的转账，并核对 USDT 合约、收款地址、6 位精度和订单金额。精确匹配才自动入账；金额不符转人工 REVIEW。过期订单在 7 天观察窗口内仍会扫描，以处理链上确认/回调延迟。
 
-**当前只完成独立地址分配、已确认入账和金额异常隔离；尚未完成自动归集。** 用户要求的每地址达到 10 USDT 才归集、低于门槛留在原地址，后续必须接入独立 HSM/KMS 签名器或受控钱包服务。不能把私钥放入普通 API 容器，也不能因为归集而共享用户私钥。
+**自动归集使用独立签名器，不在 API 中保存私钥。** 配置以下变量后，达到每地址 10 USDT（TRON_SWEEP_THRESHOLD_MINOR 默认 10000000）才会进入自动归集队列；低于门槛保留在原地址：
+- TRON_SWEEP_ENABLED=true
+- TRON_SWEEP_SIGNER_URL
+- TRON_SWEEP_SIGNER_TOKEN
+- TRON_TREASURY_ADDRESS
+- TRON_SWEEP_MAX_FEE_SUN（必须大于 0，作为单笔最高费用）
+
+签名器需要实现两个受 Bearer Token 保护的 HTTPS 接口：
+- POST /v1/tron/usdt/quote：接收 order_id、derivation_index、from_address、to_address、token_contract；返回 available_amount_minor、estimated_fee_sun、available_trx_sun 和明确的 can_sweep=true/false。
+- POST /v1/tron/usdt/sweep：接收 job_id、order_id、derivation_index、from_address、to_address、token_contract、amount_minor、max_fee_sun；必须先独立核对派生地址、实际余额和资源费用，只有费用不超过 max_fee_sun 才能签名广播；使用 Idempotency-Key 防止重复广播；返回 txid、amount_minor、fee_sun、status（SUBMITTED/ALREADY_SUBMITTED）和可选 reference。
+
+签名器必须把私钥保存在独立 HSM/KMS 或受控钱包服务中，拒绝任意地址、合约、金额和费用参数；绝不能把私钥返回给 API。API 会继续查询 TRON SolidityNode 的 solidified receipt，只有 receipt.result=SUCCESS 才把归集标记为 CONFIRMED。签名器未配置时队列保持待处理，不会假装归集成功。
+
+低于门槛的地址不会自动归集。超管可通过 POST /admin/billing/tron-sweeps 提交人工归集，系统先向签名器询价，检查可用余额、TRX 资源和费用上限，再记录管理员、原因和审计日志。
 
 官方资料：
 - https://developers.tron.network/docs/get-trc20-transaction-history
@@ -115,4 +128,5 @@ Watcher 通过 TronGrid 的 GET /v1/accounts/{address}/transactions/trc20 查询
 - [ ] 跨租户读取和写入被 RLS 拒绝。
 - [ ] USDT 地址派生使用 xpub，运行环境没有助记词或私钥。
 - [ ] USDT 未确认交易不会入账；金额异常进入 REVIEW。
+- [ ] 签名器 quote 会检查实际 USDT 余额、TRX 资源和费用上限；sweep 使用幂等键，API 只接受 solidified receipt 成功。
 - [ ] 完成服务商沙箱/小额真实测试、退款/拒付流程演练和财务对账后，才允许正式对外启用。
