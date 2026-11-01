@@ -32,3 +32,14 @@
 `UPDATE users SET platform_admin = TRUE WHERE lower(email) = lower('管理员邮箱');`
 
 不要把平台管理员权限授予普通租户 OWNER。支付接口将在后续商业化阶段接入；当前订阅变更由平台管理员手动执行。
+
+## 租户单独权益调整（阶段 4 补充）
+
+无需修改整个套餐，可由**平台超级管理员**为指定租户单独控制功能开关、增减额度：
+- `PUT /admin/tenants/{tenant_id}/feature-overrides/{feature_key}`：写入 `enabled_override`、`limit_delta`（仅 `max_*`）和必填操作原因。
+- `DELETE /admin/tenants/{tenant_id}/feature-overrides/{feature_key}`：删除该租户例外，恢复套餐默认权益。
+- `GET /billing/entitlements` 返回合并后的实际权益；所有变更写入审计日志。
+- 超额资源保留，不强制删除；需在后续任务执行层对超额运行任务实施暂停。
+- 已有数据库部署新服务前必须先执行 `005_entitlement_overrides.sql`；本仓库的 Docker 初始化迁移仅针对新数据库卷。
+
+会员续费、升级折算、自动续费、到期暂停和任务恢复的业务规则详见 [SUBSCRIPTION_LIFECYCLE.md](SUBSCRIPTION_LIFECYCLE.md)。目前**只是规格定稿**，支付和任务恢复链路尚未完成。
