@@ -312,14 +312,40 @@ async def manually_queue_tron_sweep(
                 deposit["tenant_id"],
                 deposit["id"],
             )
-            if existing:
+            if existing and existing["status"] not in {"FAILED", "REVIEW"}:
                 return {
                     "status": existing["status"],
                     "job_id": str(existing["id"]),
                     "amount_minor": existing["amount_minor"],
                     "fee_sun": existing["fee_sun"],
                 }
-            job = await conn.fetchrow(
+            if existing:
+                job = await conn.fetchrow(
+                    """
+                    UPDATE tron_sweep_jobs
+                    SET source_address = $3, derivation_index = $4,
+                        destination_address = $5, token_contract = $6,
+                        amount_minor = $7, max_fee_sun = $8, fee_sun = $9,
+                        status = 'PENDING', attempt_count = 0,
+                        next_attempt_at = NOW(), last_error_code = NULL,
+                        requested_by = $10, reason = $11, updated_at = NOW()
+                    WHERE tenant_id = $1 AND id = $2
+                    RETURNING id, status, amount_minor, fee_sun
+                    """,
+                    deposit["tenant_id"],
+                    existing["id"],
+                    deposit["deposit_address"],
+                    deposit["derivation_index"],
+                    settings.tron_treasury_address,
+                    settings.tron_usdt_contract,
+                    available_amount,
+                    settings.tron_sweep_max_fee_sun,
+                    estimated_fee,
+                    principal.user_id,
+                    payload.reason,
+                )
+            else:
+                job = await conn.fetchrow(
                 """
                 INSERT INTO tron_sweep_jobs (
                     tenant_id, topup_order_id, source_address,
