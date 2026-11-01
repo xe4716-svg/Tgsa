@@ -1,0 +1,10 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+asyncpg>=0.29,<1
+redis>=5,<7
+cryptography>=44,<47
+Telethon>=1.45,<2
+python-socks[asyncio]>=2.7,<3
+aiosmtplib>=3,<5
+pytest>=8,<9
+httpx>=0.27,<1
