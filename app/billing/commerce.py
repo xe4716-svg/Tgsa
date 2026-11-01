@@ -736,7 +736,7 @@ async def purchase_membership(
                         last_error_code = 'SUBSCRIPTION_CHANGED',
                         updated_at = NOW()
                     WHERE tenant_id = $1
-                      AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                      AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY', 'FAILED')
                     """,
                     principal.tenant_id,
                 )
