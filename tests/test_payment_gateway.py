@@ -213,4 +213,4 @@ def test_usdt_provider_is_not_reported_ready_without_chain_watcher(monkeypatch):
     ))
     ready, reason = gateway.provider_readiness("USDT")
     assert ready is False
-    assert reason == "chain_watcher_not_enabled"
+    assert reason == "tron_xpub_api_key_or_watcher_not_configured"
