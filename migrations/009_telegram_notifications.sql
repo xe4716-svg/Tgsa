@@ -153,7 +153,7 @@ BEGIN
 
     RETURN TRUE;
 EXCEPTION
-    WHEN unique_violation THEN
+    WHEN unique_violation OR foreign_key_violation THEN
         RETURN FALSE;
 END
 $link$;
