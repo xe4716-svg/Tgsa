@@ -10,8 +10,8 @@
 - 超管可单独覆盖租户功能与账号/任务额度，保留审计日志（迁移 005）。
 - 钱包与会员购买：多币种余额、不可变流水、价格版本、订单快照、购买/续费/升级钱包扣款和人工入账 API（迁移 006）。
 - 支付渠道适配器：Stripe、支付宝 RSA2、微信支付 API v3、易支付兼容协议、TRC20 xpub 独立地址和已确认转账 watcher（迁移 007）。
-- 自动续费与通知：用户主动开启/关闭、钱包余额优先扣款、余额不足等待与到账唤醒、价格变更提前通知、最多 3 次技术重试、可配置到期提醒、租户/平台时区、站内通知和 SMTP 邮件 outbox（迁移 008）。
-- 支付渠道默认关闭，必须配置真实商户密钥并完成沙箱/小额验收后才能启用；TRC20 签名器生产部署、退款/拒付、Telegram Bot 通知和到期任务实际暂停/恢复仍待完成。
+- 自动续费与通知：用户主动开启/关闭、钱包余额优先扣款、余额不足等待与到账唤醒、价格变更提前通知、最多 3 次技术重试、可配置到期提醒、租户/平台时区、站内通知、SMTP 邮件 outbox，以及用户主动绑定的 Telegram Bot 通知（迁移 008-009）。
+- 支付渠道默认关闭，必须配置真实商户密钥并完成沙箱/小额验收后才能启用；TRC20 签名器生产部署、退款/拒付、Telegram Bot 生产凭据/Webhook 联调和到期任务实际暂停/恢复仍待完成。
 - 本地 Mailpit 邮件测试服务。
 
 ## 本地启动
@@ -21,10 +21,10 @@
 4. `docker compose up --build`。
 5. API：`http://localhost:8000/docs`；健康检查：`/health/live`、`/health/ready`。
 6. 本地邮件收件箱：`http://localhost:8025`。
-7. 钱包/会员购买见 `docs/WALLET_AND_PURCHASES.md`；支付渠道配置见 `docs/PAYMENT_PROVIDER_SETUP.md`；会员生命周期见 `docs/SUBSCRIPTION_LIFECYCLE.md`；现有数据库需先备份并手动执行迁移 006、007、008。
+7. 钱包/会员购买见 `docs/WALLET_AND_PURCHASES.md`；支付渠道配置见 `docs/PAYMENT_PROVIDER_SETUP.md`；会员生命周期见 `docs/SUBSCRIPTION_LIFECYCLE.md`；现有数据库需先备份并手动执行迁移 006、007、008、009。
 
 ## 注意
 - 这是持续开发工程包，不是已经上线的完整产品。
-- 新迁移只会在 PostgreSQL 数据卷首次初始化时自动执行；已有数据库必须使用受控 migration runner 执行 006、007、008。
+- 新迁移只会在 PostgreSQL 数据卷首次初始化时自动执行；已有数据库必须使用受控 migration runner 执行 006、007、008、009。
 - 生产必须使用 HTTPS、Secret Manager/KMS、SMTP TLS 和强随机密钥。
 - Telegram 真实登录、数据库迁移和邮件联调仍需在 Docker/Telegram 凭据环境完成。
