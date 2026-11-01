@@ -1,0 +1,432 @@
+openapi: 3.1.0
+info:
+  title: TGMate MVP API
+  version: 1.0.0
+  description: Shared API contract baseline. Implementations must update this spec with reviewed contract changes.
+servers:
+  - url: /api/v1
+security:
+  - CustomerBearer: []
+components:
+  securitySchemes:
+    CustomerBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    AdminBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 160
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [success, data, request_id]
+      properties:
+        success:
+          const: true
+        data: {}
+        request_id:
+          type: string
+    ErrorEnvelope:
+      type: object
+      required: [success, error, request_id]
+      properties:
+        success:
+          const: false
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+        request_id:
+          type: string
+    TaskAction:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [pause, resume, cancel]
+    BroadcastContent:
+      type: object
+      required: [content_type]
+      properties:
+        content_type:
+          type: string
+          enum: [text, photo, video, document, album]
+        text:
+          type: string
+          maxLength: 4096
+        media_asset_id:
+          type: string
+          format: uuid
+        button_set_id:
+          type: string
+          format: uuid
+    BotBroadcastTaskCreate:
+      type: object
+      required: [bot_id, target_chat_ids, content]
+      properties:
+        bot_id:
+          type: string
+          format: uuid
+        target_chat_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+        content:
+          $ref: '#/components/schemas/BroadcastContent'
+        schedule_at:
+          type: string
+          format: date-time
+    AccountBroadcastTaskCreate:
+      type: object
+      required: [account_id, target_chat_ids, content]
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        target_chat_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+        content:
+          $ref: '#/components/schemas/BroadcastContent'
+        schedule_at:
+          type: string
+          format: date-time
+    CloneRouteCreate:
+      type: object
+      required: [source_account_id, source_chat_id, destination_chat_id, history_mode]
+      properties:
+        source_account_id:
+          type: string
+          format: uuid
+        source_chat_id:
+          type: string
+        destination_chat_id:
+          type: string
+        history_mode:
+          type: string
+          enum: [recent_count, from_date, all_accessible]
+        recent_count:
+          type: integer
+          minimum: 1
+        from_date:
+          type: string
+          format: date-time
+    PaymentOrderCreate:
+      type: object
+      required: [order_type, payment_method_code]
+      properties:
+        order_type:
+          type: string
+          enum: [membership, wallet_topup]
+        plan_id:
+          type: string
+          format: uuid
+        payment_method_code:
+          type: string
+    TxidSubmission:
+      type: object
+      required: [network_code, tx_hash]
+      properties:
+        network_code:
+          type: string
+        tx_hash:
+          type: string
+          minLength: 20
+          maxLength: 255
+paths:
+  /me:
+    get:
+      summary: Get current customer profile
+      responses:
+        '200':
+          description: Current profile
+  /me/entitlements:
+    get:
+      summary: Get current membership entitlements
+      responses:
+        '200':
+          description: Current entitlements
+  /telegram/accounts:
+    get:
+      summary: List connected Telegram accounts
+      responses:
+        '200':
+          description: Account list
+  /telegram/accounts/authorization-sessions:
+    post:
+      summary: Start Telegram authorization
+      responses:
+        '201':
+          description: Authorization session created
+  /telegram/accounts/{account_id}/connection-tests:
+    post:
+      summary: Test Telegram account connectivity
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '202':
+          description: Connection test accepted
+  /proxies:
+    get:
+      summary: List customer proxies
+      responses:
+        '200':
+          description: Proxy list
+    post:
+      summary: Add proxy
+      responses:
+        '201':
+          description: Proxy created
+  /proxies/{proxy_id}/test:
+    post:
+      summary: Test proxy connectivity
+      parameters:
+        - name: proxy_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '202':
+          description: Test accepted
+  /clone-routes:
+    get:
+      summary: List clone routes
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Clone routes
+    post:
+      summary: Create authorized one-to-one clone route
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneRouteCreate'
+      responses:
+        '201':
+          description: Clone route created
+        '403':
+          description: Source or destination permission missing
+        '409':
+          description: Duplicate or conflicting route
+  /clone-routes/{route_id}/actions:
+    post:
+      summary: Pause, resume, or cancel a clone route
+      parameters:
+        - name: route_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskAction'
+      responses:
+        '202':
+          description: Action accepted
+        '409':
+          description: Invalid state transition
+  /sticker-clone-jobs:
+    get:
+      summary: List sticker clone jobs
+      responses:
+        '200':
+          description: Sticker jobs
+    post:
+      summary: Create sticker clone job for content the customer is authorized to copy
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Sticker clone job created
+  /broadcast/bot-tasks:
+    get:
+      summary: List Bot API broadcast tasks only
+      responses:
+        '200':
+          description: Bot broadcast task list
+    post:
+      summary: Create a broadcast task using the selected Bot API identity only
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotBroadcastTaskCreate'
+      responses:
+        '201':
+          description: Bot broadcast task created
+        '403':
+          description: Bot is not a member of the target chat or lacks send permission
+  /broadcast/bot-tasks/{task_id}/actions:
+    post:
+      summary: Pause, resume, or cancel a Bot broadcast task
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskAction'
+      responses:
+        '202':
+          description: Action accepted
+  /broadcast/account-tasks:
+    get:
+      summary: List personal Telegram account (MTProto) broadcast tasks only
+      responses:
+        '200':
+          description: Account broadcast task list
+    post:
+      summary: Create a broadcast task using the selected authorized Telegram account only
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountBroadcastTaskCreate'
+      responses:
+        '201':
+          description: Account broadcast task created
+        '403':
+          description: Account lacks access or publish permission for a target
+  /broadcast/account-tasks/{task_id}/actions:
+    post:
+      summary: Pause, resume, or cancel a personal account broadcast task
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskAction'
+      responses:
+        '202':
+          description: Action accepted
+  /payment-orders:
+    get:
+      summary: List payment orders
+      responses:
+        '200':
+          description: Payment orders
+    post:
+      summary: Create a payment order; price is calculated server-side
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentOrderCreate'
+      responses:
+        '201':
+          description: Payment order created
+        '422':
+          description: Invalid purchase request
+  /payment-orders/{order_id}/txid-submissions:
+    post:
+      summary: Submit a transaction hash for server-side verification
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TxidSubmission'
+      responses:
+        '202':
+          description: Verification accepted
+        '409':
+          description: Transaction already allocated
+  /wallets:
+    get:
+      summary: List customer wallets
+      responses:
+        '200':
+          description: Wallet list
+  /tutorial-bindings:
+    get:
+      summary: Get enabled tutorial bindings for current UI context
+      responses:
+        '200':
+          description: Tutorial bindings
