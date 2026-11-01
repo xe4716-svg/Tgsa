@@ -482,7 +482,7 @@ async def get_wallet_topup(
 
 
 async def _process_verified_payment(
-    request: Request,
+    pool,
     provider: str,
     details: dict,
     raw_body: bytes,
@@ -490,7 +490,6 @@ async def _process_verified_payment(
     order_no = str(details["order_no"])
     event_id = str(details["event_id"])
     payload_hash = hashlib.sha256(raw_body).hexdigest()
-    pool = request.app.state.db_pool
     async with pool.acquire() as conn:
         async with conn.transaction():
             inserted = await conn.fetchrow(
@@ -541,6 +540,28 @@ async def _process_verified_payment(
                 or routed["currency"] != details["currency"]
                 or routed["amount_minor"] != int(details["amount_minor"])
             ):
+                if provider == "USDT" and routed["provider"] == "USDT":
+                    await conn.execute(
+                        "SELECT set_config('app.tenant_id', $1, true)",
+                        str(routed["tenant_id"]),
+                    )
+                    await conn.execute(
+                        """
+                        UPDATE wallet_topup_orders
+                        SET status = 'REVIEW', updated_at = NOW(),
+                            metadata = metadata || $3::jsonb
+                        WHERE tenant_id = $1 AND id = $2
+                          AND status IN ('PENDING', 'EXPIRED')
+                        """,
+                        routed["tenant_id"],
+                        routed["id"],
+                        json.dumps({
+                            "chain_payment_mismatch": True,
+                            "observed_amount_minor": int(details["amount_minor"]),
+                            "observed_currency": details["currency"],
+                            "provider_transaction_id": details.get("provider_transaction_id"),
+                        }),
+                    )
                 await conn.execute(
                     """
                     UPDATE payment_webhook_events
@@ -591,7 +612,7 @@ async def _process_verified_payment(
                     inserted["id"],
                 )
                 return "already_paid"
-            if topup["status"] in {"FAILED", "CANCELED"}:
+            if topup["status"] in {"FAILED", "CANCELED", "REVIEW"}:
                 await conn.execute(
                     """
                     UPDATE payment_webhook_events
@@ -743,7 +764,7 @@ async def alipay_webhook(request: Request):
         verified = verify_alipay_notification(params)
         details = alipay_payment_details(verified)
         if details is not None:
-            await _process_verified_payment(request, "ALIPAY", details, raw)
+            await _process_verified_payment(request.app.state.db_pool, "ALIPAY", details, raw)
     except PaymentVerificationError:
         return PlainTextResponse("failure", status_code=400)
     return PlainTextResponse("success")
@@ -756,7 +777,7 @@ async def wechat_webhook(request: Request):
         verified = verify_wechat_notification(raw, request.headers)
         details = wechat_payment_details(verified)
         if details is not None:
-            await _process_verified_payment(request, "WECHAT", details, raw)
+            await _process_verified_payment(request.app.state.db_pool, "WECHAT", details, raw)
     except PaymentVerificationError:
         return JSONResponse(
             status_code=400,
@@ -773,7 +794,7 @@ async def easypay_webhook(request: Request):
         verified = verify_easypay_notification(params)
         details = easypay_payment_details(verified)
         if details is not None:
-            await _process_verified_payment(request, "EASYPAY", details, raw or urlencode_bytes(params))
+            await _process_verified_payment(request.app.state.db_pool, "EASYPAY", details, raw or urlencode_bytes(params))
     except PaymentVerificationError:
         return PlainTextResponse("fail", status_code=400)
     return PlainTextResponse("success")
