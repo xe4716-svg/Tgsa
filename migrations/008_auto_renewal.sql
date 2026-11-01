@@ -355,7 +355,11 @@ SET search_path = public, pg_temp
 AS $reminders$
     SELECT
         s.tenant_id, s.id, p.code, p.name, s.status, s.expires_at,
-        COALESCE(pref.timezone, ar.timezone, cfg.platform_timezone, 'UTC'),
+        CASE
+            WHEN cfg.notification_timezone_mode = 'PLATFORM'
+                THEN cfg.platform_timezone
+            ELSE COALESCE(pref.timezone, ar.timezone, 'UTC')
+        END,
         u.id,
         CASE WHEN u.email_verified_at IS NOT NULL THEN u.email ELSE NULL END,
         COALESCE(pref.email_notifications_enabled, TRUE)
