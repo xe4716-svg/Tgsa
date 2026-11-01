@@ -43,3 +43,13 @@ async def send_password_reset_email(to_email: str, token: str) -> None:
         "Use the link below to reset your password. This link expires in 30 minutes.\n\n"
         f"{url}\n\nIf you did not request this, ignore this message.",
     )
+
+
+
+async def send_billing_notification_email(
+    to_email: str,
+    subject: str,
+    body: str,
+) -> None:
+    """Send a billing/renewal notice through the configured SMTP transport."""
+    await _send(to_email, subject, body)
