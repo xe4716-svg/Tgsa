@@ -823,6 +823,47 @@ async def _process_verified_payment(
                     "provider_transaction_id": details.get("provider_transaction_id"),
                 }),
             )
+
+            if provider == "USDT" and topup["amount_minor"] >= settings.tron_sweep_threshold_minor:
+                if topup["deposit_address"] and topup["derivation_index"] is not None and settings.tron_treasury_address:
+                    await conn.execute(
+                        """
+                        INSERT INTO tron_sweep_jobs (
+                            tenant_id, topup_order_id, source_address,
+                            derivation_index, destination_address, token_contract,
+                            amount_minor, max_fee_sun, reason
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        ON CONFLICT (tenant_id, topup_order_id) DO NOTHING
+                        """,
+                        tenant_id,
+                        topup["id"],
+                        topup["deposit_address"],
+                        topup["derivation_index"],
+                        settings.tron_treasury_address,
+                        settings.tron_usdt_contract,
+                        topup["amount_minor"],
+                        settings.tron_sweep_max_fee_sun,
+                        "Automatic per-address consolidation threshold reached",
+                    )
+                    await conn.execute(
+                        """
+                        INSERT INTO audit_logs (
+                            tenant_id, actor_user_id, action, resource_type,
+                            resource_id, details
+                        )
+                        VALUES ($1, NULL, 'TRON_SWEEP_QUEUED', 'tron_sweep_job',
+                                NULL, $2::jsonb)
+                        """,
+                        tenant_id,
+                        json.dumps({
+                            "topup_order_id": str(topup["id"]),
+                            "source_address": topup["deposit_address"],
+                            "destination_address": settings.tron_treasury_address,
+                            "amount_minor": topup["amount_minor"],
+                            "threshold_minor": settings.tron_sweep_threshold_minor,
+                        }),
+                    )
             await conn.execute(
                 """
                 UPDATE payment_webhook_events
