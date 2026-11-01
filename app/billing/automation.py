@@ -146,9 +146,12 @@ async def _notify_user(
 async def _tenant_email_enabled(conn, tenant_id: UUID) -> bool:
     return bool(await conn.fetchval(
         """
-        SELECT COALESCE(email_notifications_enabled, TRUE)
-        FROM tenant_billing_preferences
-        WHERE tenant_id = $1
+        SELECT COALESCE(
+            (SELECT email_notifications_enabled
+             FROM tenant_billing_preferences
+             WHERE tenant_id = $1),
+            TRUE
+        )
         """,
         tenant_id,
     ))
@@ -537,6 +540,8 @@ async def update_billing_automation_settings(
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
     _require_platform_admin(principal)
+    if payload.renewal_advance_days not in {1, 3, 7}:
+        raise HTTPException(status_code=422, detail="Renewal advance must be 1, 3 or 7 days")
     if payload.notification_timezone_mode not in {"TENANT", "PLATFORM"}:
         raise HTTPException(status_code=422, detail="Timezone mode must be TENANT or PLATFORM")
     platform_timezone = _validate_timezone(payload.platform_timezone)
@@ -632,13 +637,15 @@ async def _process_renewal_intent(pool, intent) -> None:
                        ar.last_price_minor, ar.last_price_version,
                        s.status AS subscription_status, s.expires_at,
                        s.plan_id AS current_plan_id,
-                       p.code AS current_plan_code
+                       p.code AS current_plan_code,
+                       CASE WHEN u.email_verified_at IS NOT NULL THEN u.email ELSE NULL END AS email
                 FROM subscription_renewal_intents i
                 LEFT JOIN tenant_auto_renew_settings ar
                   ON ar.tenant_id = i.tenant_id
                 LEFT JOIN tenant_subscriptions s
                   ON s.tenant_id = i.tenant_id AND s.id = i.subscription_id
                 LEFT JOIN membership_plans p ON p.id = s.plan_id
+                LEFT JOIN users u ON u.id = i.user_id
                 WHERE i.tenant_id = $1 AND i.id = $2
                 """,
                 tenant_id,
@@ -712,23 +719,32 @@ async def _process_renewal_intent(pool, intent) -> None:
 
             price_minor = int(current_price["amount_minor"])
             price_version = int(current_price["version"])
-            intent_price_changed = (
-                int(state["amount_minor"]) != price_minor
-                or int(state["price_version"]) != price_version
-            )
-            baseline_price_changed = (
+            intent_amount_changed = int(state["amount_minor"]) != price_minor
+            baseline_amount_changed = (
                 state["last_price_minor"] is not None
-                and (
-                    int(state["last_price_minor"]) != price_minor
-                    or int(state["last_price_version"]) != price_version
+                and int(state["last_price_minor"]) != price_minor
+            )
+            price_amount_changed = intent_amount_changed or baseline_amount_changed
+            price_version_changed = (
+                int(state["price_version"]) != price_version
+                or (
+                    state["last_price_version"] is not None
+                    and int(state["last_price_version"]) != price_version
                 )
             )
-            if intent_price_changed or baseline_price_changed:
-                old_price = int(state["amount_minor"])
+            if price_amount_changed:
+                old_price = (
+                    int(state["last_price_minor"])
+                    if baseline_amount_changed
+                    else int(state["amount_minor"])
+                )
+                notice_hours = int(await conn.fetchval(
+                    "SELECT price_change_notice_hours FROM billing_automation_settings WHERE id = 1"
+                ))
                 body = (
                     f"自动续费价格发生变化：{_format_amount(state['currency'], old_price)} "
                     f"调整为 {_format_amount(state['currency'], price_minor)}。"
-                    "系统将在价格通知等待期结束后，按最新价格尝试从钱包余额扣款。"
+                    f"系统将在至少 {notice_hours} 小时通知等待期结束后，按最新价格尝试从钱包余额扣款。"
                     "你可以在等待期间关闭自动续费。"
                 )
                 email_enabled = await _tenant_email_enabled(conn, tenant_id)
@@ -745,16 +761,11 @@ async def _process_renewal_intent(pool, intent) -> None:
                         "old_amount_minor": old_price,
                         "new_amount_minor": price_minor,
                         "price_version": price_version,
-                        "notice_hours": int(await conn.fetchval(
-                            "SELECT price_change_notice_hours FROM billing_automation_settings WHERE id = 1"
-                        )),
+                        "notice_hours": notice_hours,
                     },
                     email_enabled=email_enabled,
-                    recipient_email=state["email"] if "email" in state else None,
+                    recipient_email=state["email"],
                 )
-                notice_hours = int(await conn.fetchval(
-                    "SELECT price_change_notice_hours FROM billing_automation_settings WHERE id = 1"
-                ))
                 fingerprint = hashlib.sha256(
                     f"{state['plan_code_snapshot']}|{state['duration_days']}|{state['currency']}|{price_minor}|{price_version}".encode()
                 ).hexdigest()
@@ -787,6 +798,34 @@ async def _process_renewal_intent(pool, intent) -> None:
                     price_version,
                 )
                 return
+            if price_version_changed:
+                fingerprint = hashlib.sha256(
+                    f"{state['plan_code_snapshot']}|{state['duration_days']}|{state['currency']}|{price_minor}|{price_version}".encode()
+                ).hexdigest()
+                await conn.execute(
+                    """
+                    UPDATE subscription_renewal_intents
+                    SET amount_minor = $3, price_version = $4,
+                        request_fingerprint = $5, updated_at = NOW()
+                    WHERE tenant_id = $1 AND id = $2
+                    """,
+                    tenant_id,
+                    intent_id,
+                    price_minor,
+                    price_version,
+                    fingerprint,
+                )
+                await conn.execute(
+                    """
+                    UPDATE tenant_auto_renew_settings
+                    SET last_price_minor = $2, last_price_version = $3,
+                        updated_at = NOW()
+                    WHERE tenant_id = $1
+                    """,
+                    tenant_id,
+                    price_minor,
+                    price_version,
+                )
 
             # The commerce transaction checks this exact price version again before charging.
             expected_version = price_version
@@ -843,7 +882,7 @@ async def _process_renewal_intent(pool, intent) -> None:
                         body=balance_body,
                         payload=detail,
                         email_enabled=email_enabled,
-                        recipient_email=state["email"] if "email" in state else None,
+                        recipient_email=state["email"],
                     )
                     await conn.execute(
                         """
@@ -912,7 +951,7 @@ async def _process_renewal_intent(pool, intent) -> None:
                 body=f"已成功从钱包扣除 {_format_amount(currency, expected_amount)}，会员期限已顺延。",
                 payload={"order_id": str(order_id), "currency": currency, "amount_minor": expected_amount},
                 email_enabled=email_enabled,
-                recipient_email=state["email"] if "email" in state else None,
+                recipient_email=state["email"],
             )
 
 
@@ -966,7 +1005,7 @@ async def _record_renewal_failure(pool, state, error_code: str) -> None:
                     body="系统已达到自动重试次数上限，请检查钱包或支付状态并手动续费。",
                     payload={"error_code": error_code},
                     email_enabled=email_enabled,
-                    recipient_email=state["email"] if "email" in state else None,
+                    recipient_email=state["email"],
                 )
 
 
