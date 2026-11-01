@@ -523,7 +523,6 @@ async def create_telegram_notification_link(
                 """
                 DELETE FROM tenant_telegram_link_tokens
                 WHERE tenant_id = $1 AND user_id = $2
-                  AND (used_at IS NOT NULL OR expires_at <= NOW())
                 """,
                 principal.tenant_id,
                 principal.user_id,
