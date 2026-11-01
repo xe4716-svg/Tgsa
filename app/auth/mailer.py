@@ -5,13 +5,20 @@ import aiosmtplib
 from app.config import settings
 
 
-async def _send(to_email: str, subject: str, body: str) -> None:
+async def _send(
+    to_email: str,
+    subject: str,
+    body: str,
+    message_id: str | None = None,
+) -> None:
     if not settings.smtp_host:
         raise RuntimeError("SMTP_HOST is not configured")
     message = EmailMessage()
     message["From"] = settings.email_from
     message["To"] = to_email
     message["Subject"] = subject
+    if message_id:
+        message["Message-ID"] = message_id
     message.set_content(body)
     await aiosmtplib.send(
         message,
@@ -50,6 +57,7 @@ async def send_billing_notification_email(
     to_email: str,
     subject: str,
     body: str,
+    message_id: str | None = None,
 ) -> None:
-    """Send a billing/renewal notice through the configured SMTP transport."""
-    await _send(to_email, subject, body)
+    """Send a billing/renewal notice with a stable id for outbox retries."""
+    await _send(to_email, subject, body, message_id=message_id)
