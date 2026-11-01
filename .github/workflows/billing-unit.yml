@@ -20,7 +20,21 @@ on:
 jobs:
   billing:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,3 +46,16 @@ jobs:
         run: python -m compileall -q app/billing tests/test_billing_entitlements.py tests/test_billing_commerce.py
       - name: Run billing unit tests
         run: python -m pytest -q tests/test_billing_entitlements.py tests/test_billing_commerce.py
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Apply all database migrations
+        env:
+          PGPASSWORD: postgres-test-password
+          APP_DB_PASSWORD: runtime-test-password
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE tgs"
+          for migration in migrations/*.sql; do
+            echo "Applying $migration"
+            psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -f "$migration"
+          done
+          psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM membership_plans"
