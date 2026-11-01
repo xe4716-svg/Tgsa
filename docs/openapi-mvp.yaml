@@ -76,6 +76,58 @@ components:
         action:
           type: string
           enum: [pause, resume, cancel]
+    BroadcastContent:
+      type: object
+      required: [content_type]
+      properties:
+        content_type:
+          type: string
+          enum: [text, photo, video, document, album]
+        text:
+          type: string
+          maxLength: 4096
+        media_asset_id:
+          type: string
+          format: uuid
+        button_set_id:
+          type: string
+          format: uuid
+    BotBroadcastTaskCreate:
+      type: object
+      required: [bot_id, target_chat_ids, content]
+      properties:
+        bot_id:
+          type: string
+          format: uuid
+        target_chat_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+        content:
+          $ref: '#/components/schemas/BroadcastContent'
+        schedule_at:
+          type: string
+          format: date-time
+    AccountBroadcastTaskCreate:
+      type: object
+      required: [account_id, target_chat_ids, content]
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        target_chat_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+        content:
+          $ref: '#/components/schemas/BroadcastContent'
+        schedule_at:
+          type: string
+          format: date-time
     CloneRouteCreate:
       type: object
       required: [source_account_id, source_chat_id, destination_chat_id, history_mode]
@@ -241,19 +293,88 @@ paths:
       responses:
         '201':
           description: Sticker clone job created
-  /broadcast-tasks:
+  /broadcast/bot-tasks:
     get:
-      summary: List broadcast tasks
+      summary: List Bot API broadcast tasks only
       responses:
         '200':
-          description: Broadcast tasks
+          description: Bot broadcast task list
     post:
-      summary: Create a broadcast task
+      summary: Create a broadcast task using the selected Bot API identity only
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotBroadcastTaskCreate'
       responses:
         '201':
-          description: Broadcast task created
+          description: Bot broadcast task created
+        '403':
+          description: Bot is not a member of the target chat or lacks send permission
+  /broadcast/bot-tasks/{task_id}/actions:
+    post:
+      summary: Pause, resume, or cancel a Bot broadcast task
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskAction'
+      responses:
+        '202':
+          description: Action accepted
+  /broadcast/account-tasks:
+    get:
+      summary: List personal Telegram account (MTProto) broadcast tasks only
+      responses:
+        '200':
+          description: Account broadcast task list
+    post:
+      summary: Create a broadcast task using the selected authorized Telegram account only
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountBroadcastTaskCreate'
+      responses:
+        '201':
+          description: Account broadcast task created
+        '403':
+          description: Account lacks access or publish permission for a target
+  /broadcast/account-tasks/{task_id}/actions:
+    post:
+      summary: Pause, resume, or cancel a personal account broadcast task
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskAction'
+      responses:
+        '202':
+          description: Action accepted
   /payment-orders:
     get:
       summary: List payment orders
