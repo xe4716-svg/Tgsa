@@ -12,6 +12,9 @@ on:
     paths:
       - 'app/billing/**'
       - 'tests/test_billing_entitlements.py'
+      - 'tests/test_billing_commerce.py'
+      - 'migrations/006_wallet_commerce.sql'
+      - 'app/main.py'
       - '.github/workflows/billing-unit.yml'
 
 jobs:
