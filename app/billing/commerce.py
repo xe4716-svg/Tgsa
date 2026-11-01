@@ -151,6 +151,23 @@ async def _load_purchase_quote(
                 status_code=409,
                 detail="This subscription has no expiry date and does not need renewal",
             )
+        existing_term_currencies = await conn.fetch(
+            """
+            SELECT DISTINCT currency
+            FROM subscription_terms
+            WHERE tenant_id = $1
+              AND status = 'ACTIVE'
+              AND ends_at > $2
+              AND net_paid_minor > 0
+            """,
+            tenant_id,
+            db_now,
+        )
+        if any(row["currency"] != currency for row in existing_term_currencies):
+            raise HTTPException(
+                status_code=409,
+                detail="Renewal must use the same currency as the remaining paid membership value",
+            )
         order_kind = "RENEWAL"
         effective_start = max(current["expires_at"], db_now)
         upgrade_credit = 0
