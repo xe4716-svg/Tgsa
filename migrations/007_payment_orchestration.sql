@@ -63,6 +63,8 @@ CREATE TABLE wallet_topup_orders (
     order_no VARCHAR(48) NOT NULL UNIQUE,
     provider VARCHAR(16) NOT NULL
         REFERENCES payment_provider_configs(provider),
+    idempotency_key VARCHAR(120) NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
     currency VARCHAR(8) NOT NULL
         CHECK (currency IN ('CNY', 'USD', 'USDT')),
     amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
@@ -77,7 +79,8 @@ CREATE TABLE wallet_topup_orders (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, id)
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, idempotency_key)
 );
 CREATE INDEX idx_wallet_topup_tenant_time
     ON wallet_topup_orders(tenant_id, created_at DESC);
