@@ -473,7 +473,7 @@ async def get_billing_notification_preferences(
     return {
         "timezone": row["timezone"] if row else "UTC",
         "email_notifications_enabled": row["email_notifications_enabled"] if row else True,
-        "telegram_notifications_enabled": row["telegram_notifications_enabled"] if row else False,
+        "telegram_notifications_enabled": row["telegram_linked"] if row else False,
         "telegram_linked": row["telegram_linked"] if row else False,
         "timezone_confirmed_at": row["timezone_confirmed_at"] if row else None,
     }
