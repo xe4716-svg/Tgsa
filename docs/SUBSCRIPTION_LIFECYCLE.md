@@ -1,7 +1,7 @@
 # TG SaaS V1.0 — 会员生命周期与任务恢复规则（2026-11-01）
 
-> 状态：钱包交易、支付渠道适配器、自动续费设置/调度、站内通知、邮件通知和到期状态处理已进入代码仓库；真实商户联调、独立 TRC20 签名器生产部署、Telegram 通知通道、运行任务暂停及续费后资源恢复仍需完成。
-> 现有实现：迁移 004-008、app/billing/service.py、app/billing/router.py、app/billing/commerce.py、app/billing/payments.py 和 app/billing/automation.py。
+> 状态：钱包交易、支付渠道适配器、自动续费设置/调度、站内通知、邮件通知和到期状态处理已进入代码仓库；真实商户联调、独立 TRC20 签名器生产部署、Telegram Bot 真实部署联调、运行任务暂停及续费后资源恢复仍需完成。
+> 现有实现：迁移 004-009、app/billing/service.py、app/billing/router.py、app/billing/commerce.py、app/billing/payments.py 和 app/billing/automation.py。
 > 重要边界：当前仓库尚无完整 Telegram 克隆任务执行 Worker，因此到期时权益门禁会回落 FREE 并记录过期/通知，但不能宣称已暂停所有实际 Telegram 发送任务；资源选择与安全恢复仍是后续实施项。
 
 ## 1. 产品不变式
@@ -48,7 +48,7 @@
 
 - 默认关闭，租户主动开启，可随时关闭；只续当前套餐。
 - 超管配置提前 1/3/7 天等扣款节点。系统按客户选用的提醒时区发送到期提醒；实际到期统一按 UTC 瞬时时间判定。
-- 优先扣平台钱包余额；余额不足：发送站内通知和已验证邮箱通知，创建待余额的续费意图，**不得**产生负余额。Telegram Bot 通知通道尚未接入。
+- 优先扣平台钱包余额；余额不足：发送站内通知、已验证邮箱通知，以及用户主动绑定后发送的 Telegram Bot 通知；创建待余额续费意图，**不得**产生负余额。
 - 到账时若订阅尚未到期且仍启用自动续费，可对已有待处理意图尝试扣款；若已过期则不再自动扣款，用户须手动重新选套餐。
 - 技术故障最多重试 3 次，按可配置间隔。余额不足与支付拒绝不应无限重试。
 - 用户关闭自动续费后，撤销未提交扣款的待处理自动意图；不撤销已完成的会员有效期。
@@ -96,7 +96,7 @@
 - 新增 API：GET/PUT /billing/auto-renew、GET/PUT /billing/notification-preferences、GET /billing/notifications、POST /billing/notifications/{id}/read、GET/PUT /admin/billing/automation-settings。
 - API 启动时启动自动续费/提醒/邮件 Worker；通过 PostgreSQL advisory lock 确保多 API 副本只有一个执行者。
 
-**仍待实现：** 真实商户沙箱/生产联调、退款/拒付/冲正、Telegram Bot 通知通道、到期实际任务暂停、续费后的资源选择与 Telegram Worker 安全恢复。当前没有预置套餐价格，超管必须先配置价格才能购买。
+**仍待实现：** 真实商户沙箱/生产联调、退款/拒付/冲正、Telegram Bot 凭据与 Webhook 的生产部署联调、到期实际任务暂停、续费后的资源选择与 Telegram Worker 安全恢复。当前没有预置套餐价格，超管必须先配置价格才能购买。
 
 部署注意：新数据库初始化会按文件名执行 001 至 008；已有数据卷不会自动执行新增迁移。先备份，再由数据库管理员按顺序执行尚未应用的迁移 006、007、008，最后部署应用版本。详细接口和金额单位见 docs/WALLET_AND_PURCHASES.md。
 
