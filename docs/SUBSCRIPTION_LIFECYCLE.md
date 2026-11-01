@@ -1,8 +1,8 @@
 # TG SaaS V1.0 — 会员生命周期与任务恢复规则（2026-11-01）
 
-> 状态：产品及技术规则定稿；**不是**支付、钱包、自动续费和任务恢复已完成实现的声明。
-> 现有实现：`004_membership.sql`、`005_entitlement_overrides.sql`、`app/billing/service.py` 和管理端套餐/权益 API。
-> 后续实施：价格快照、订单、余额总账、续费交易、到期调度和 Worker 恢复编排。
+> 状态：产品及技术规则定稿；钱包余额、价格版本、订单和钱包购买/续费/升级基础 API 已实现；**不是**第三方自动支付、自动续费和任务恢复已完成的声明。
+> 现有实现：迁移 004-006、app/billing/service.py、app/billing/router.py 和 app/billing/commerce.py。
+> 后续实施：第三方支付回调、自动续费调度、到期任务暂停和 Worker 恢复编排。
 
 ## 1. 产品不变式
 
