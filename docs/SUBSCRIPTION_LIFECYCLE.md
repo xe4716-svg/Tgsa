@@ -87,18 +87,18 @@
 - 人工充值：管理员核实顾客付款后可直接加钱包余额，不要求顾客先建充值订单或上传截图。
 - 手动会员分配修正：同套餐分配会顺延原到期时间；不会因默认 30 天而缩短无限期订阅。
 
-**迁移 008 自动续费与通知已进入代码仓库：**
+**迁移 008 自动续费与通知、迁移 009 Telegram Bot 通知已进入代码仓库：**
 - 用户可开启/关闭自动续费，选择续费币种、周期和 IANA 时区；默认关闭。
 - 自动续费仅适用于有效的付费、有限期订阅；只续当前套餐，默认提前 3 天创建幂等续费意图。
 - 自动扣款只使用平台钱包余额；余额不足进入 WAITING_FOR_BALANCE，钱包充值/人工入账后立即唤醒；已过期不再自动扣款。
 - 技术异常最多重试 3 次，重试间隔由超管配置；价格变化按最新价格版本重新报价，并先发通知、等待配置时长后再尝试扣款。
-- 站内通知和 SMTP 邮件使用唯一去重键及邮件 outbox；到期提醒默认 7/3/1/0 天，支持超管自定义提醒节点与平台/租户时区。
-- 新增 API：GET/PUT /billing/auto-renew、GET/PUT /billing/notification-preferences、GET /billing/notifications、POST /billing/notifications/{id}/read、GET/PUT /admin/billing/automation-settings。
-- API 启动时启动自动续费/提醒/邮件 Worker；通过 PostgreSQL advisory lock 确保多 API 副本只有一个执行者。
+- 站内通知、SMTP 邮件和 Telegram Bot 消息使用唯一去重键与独立 outbox；到期提醒默认 7/3/1/0 天，支持超管自定义提醒节点与平台/租户时区。
+- 新增 API：GET/PUT /billing/auto-renew、GET/PUT /billing/notification-preferences、GET/POST/DELETE /billing/telegram-link、POST /webhooks/platform-telegram、GET /billing/notifications、POST /billing/notifications/{id}/read、GET/PUT /admin/billing/automation-settings。
+- API 启动时启动自动续费/提醒/邮件/Telegram outbox Worker；通过 PostgreSQL advisory lock 确保多 API 副本只有一个执行者。
 
 **仍待实现：** 真实商户沙箱/生产联调、退款/拒付/冲正、Telegram Bot 凭据与 Webhook 的生产部署联调、到期实际任务暂停、续费后的资源选择与 Telegram Worker 安全恢复。当前没有预置套餐价格，超管必须先配置价格才能购买。
 
-部署注意：新数据库初始化会按文件名执行 001 至 008；已有数据卷不会自动执行新增迁移。先备份，再由数据库管理员按顺序执行尚未应用的迁移 006、007、008，最后部署应用版本。详细接口和金额单位见 docs/WALLET_AND_PURCHASES.md。
+部署注意：新数据库初始化会按文件名执行 001 至 009；已有数据卷不会自动执行新增迁移。先备份，再由数据库管理员按顺序执行尚未应用的迁移 006、007、008、009，最后部署应用版本。详细接口和金额单位见 docs/WALLET_AND_PURCHASES.md。
 
 ## 8. 核心验收场景
 
