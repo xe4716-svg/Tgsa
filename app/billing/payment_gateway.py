@@ -87,9 +87,13 @@ def provider_readiness(provider: str) -> tuple[bool, str | None]:
             and settings.easypay_key
         )
     elif provider == "USDT":
-        # The TRON address allocator and confirmed-transfer watcher are a separate
-        # service; an xpub alone is not enough to accept deposits safely.
-        return False, "chain_watcher_not_enabled"
+        ready = bool(
+            settings.tron_account_xpub
+            and settings.trongrid_api_key
+            and settings.tron_watcher_enabled
+        )
+        if not ready:
+            return False, "tron_xpub_api_key_or_watcher_not_configured"
     else:
         return False, "unsupported_provider"
     return (True, None) if ready else (False, "provider_credentials_incomplete")
