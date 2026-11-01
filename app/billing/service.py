@@ -75,20 +75,30 @@ async def load_entitlements(
 
     feature_rows = await conn.fetch(
         """
-        SELECT feature_key, enabled, limit_value, config
-        FROM plan_features
-        WHERE plan_id = $1
+        SELECT f.feature_key, f.enabled, f.limit_value, f.config,
+               o.enabled_override, o.limit_delta
+        FROM plan_features f
+        LEFT JOIN tenant_feature_overrides o
+          ON o.tenant_id = $2 AND o.feature_key = f.feature_key
+        WHERE f.plan_id = $1
         """,
         plan_id,
+        tenant_id,
     )
-    features = {
-        item["feature_key"]: {
-            "enabled": item["enabled"],
-            "limit": item["limit_value"],
+    features: dict[str, dict[str, Any]] = {}
+    for item in feature_rows:
+        # A missing override inherits the plan. NULL plan limit means unlimited.
+        enabled_override = item.get("enabled_override")
+        base_limit = item["limit_value"]
+        limit_delta = item.get("limit_delta") or 0
+        effective_limit = (
+            None if base_limit is None else max(0, base_limit + limit_delta)
+        )
+        features[item["feature_key"]] = {
+            "enabled": item["enabled"] if enabled_override is None else enabled_override,
+            "limit": effective_limit,
             "config": item["config"] or {},
         }
-        for item in feature_rows
-    }
     return Entitlements(
         plan_code=plan_code,
         plan_name=plan_name,
