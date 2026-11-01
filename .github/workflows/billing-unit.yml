@@ -68,8 +68,8 @@ jobs:
           TENANT_B=$(psql -h localhost -U postgres -d tgs -Atqc "INSERT INTO tenants(name) VALUES ('CI tenant B') RETURNING id")
           psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "INSERT INTO tenant_wallet_accounts(tenant_id, currency, balance_minor) VALUES ('$TENANT_A', 'USD', 100), ('$TENANT_B', 'USD', 200)"
           PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -v ON_ERROR_STOP=1 -c "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); INSERT INTO wallet_ledger_entries(tenant_id, currency, direction, entry_type, amount_minor, balance_after_minor, idempotency_key, reason) VALUES ('$TENANT_A', 'USD', 'CREDIT', 'ADMIN_CREDIT', 100, 100, 'ci-wallet-ledger-smoke', 'CI smoke test'); COMMIT"
-          VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); SELECT COUNT(*) FROM tenant_wallet_accounts; COMMIT")
-          test "$VISIBLE" = "$(printf '%s\n%s' "$TENANT_A" "1" | tail -n 1)"
+          VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); SELECT COUNT(*) FROM tenant_wallet_accounts; COMMIT" | tail -n 1)
+          test "$VISIBLE" = "1"
           if PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -v ON_ERROR_STOP=1 -c "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); INSERT INTO tenant_wallet_accounts(tenant_id, currency, balance_minor) VALUES ('$TENANT_B', 'USD', 999); COMMIT"; then
             echo "Cross-tenant wallet write unexpectedly succeeded"
             exit 1
