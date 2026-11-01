@@ -1052,7 +1052,12 @@ async def _process_verified_payment(
             )
 
             if provider == "USDT" and topup["amount_minor"] >= settings.tron_sweep_threshold_minor:
-                if topup["deposit_address"] and topup["derivation_index"] is not None and settings.tron_treasury_address:
+                if (
+                    topup["deposit_address"]
+                    and topup["derivation_index"] is not None
+                    and settings.tron_treasury_address
+                    and settings.tron_sweep_max_fee_sun > 0
+                ):
                     sweep_job = await conn.fetchrow(
                         """
                         INSERT INTO tron_sweep_jobs (
