@@ -43,6 +43,11 @@ class WalletTopupRequest(BaseModel):
     channel: str | None = Field(default=None, max_length=16)
 
 
+class ManualTronSweepRequest(BaseModel):
+    order_no: str = Field(min_length=16, max_length=48)
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class PaymentProviderUpdateRequest(BaseModel):
     enabled: bool
     min_amount_minor: int = Field(gt=0, le=9_000_000_000_000_000)
@@ -172,6 +177,198 @@ async def list_payment_methods(request: Request):
             "contact_url": settings.manual_payment_contact_url if provider == "MANUAL" else None,
         })
     return {"methods": methods}
+
+
+@router.get("/admin/billing/tron-sweeps")
+async def admin_list_tron_sweeps(
+    request: Request,
+    status: str | None = None,
+    limit: int = 100,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    _require_platform_admin(principal)
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=422, detail="Limit must be between 1 and 500")
+    if status is not None and status not in {
+        "PENDING", "PROCESSING", "RETRY", "SUBMITTED",
+        "CONFIRMED", "FAILED", "REVIEW",
+    }:
+        raise HTTPException(status_code=422, detail="Invalid sweep status")
+    async with request.app.state.db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM list_tron_sweep_jobs($1, $2)",
+            status,
+            limit,
+        )
+    return {
+        "jobs": [
+            {
+                "id": str(row["id"]),
+                "tenant_id": str(row["tenant_id"]),
+                "order_no": row["order_no"],
+                "source_address": row["source_address"],
+                "destination_address": row["destination_address"],
+                "amount_minor": row["amount_minor"],
+                "max_fee_sun": row["max_fee_sun"],
+                "fee_sun": row["fee_sun"],
+                "status": row["status"],
+                "txid": row["txid"],
+                "attempt_count": row["attempt_count"],
+                "last_error_code": row["last_error_code"],
+                "reason": row["reason"],
+                "created_at": row["created_at"],
+                "confirmed_at": row["confirmed_at"],
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.post("/admin/billing/tron-sweeps")
+async def manually_queue_tron_sweep(
+    payload: ManualTronSweepRequest,
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    _require_platform_admin(principal)
+    if not (
+        settings.tron_watcher_enabled
+        and settings.tron_sweep_enabled
+        and settings.tron_sweep_signer_url
+        and settings.tron_sweep_signer_token
+        and settings.tron_treasury_address
+        and settings.tron_sweep_max_fee_sun > 0
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="TRC20 watcher, signer, treasury address and fee limit must be configured",
+        )
+
+    async with request.app.state.db_pool.acquire() as conn:
+        deposit = await conn.fetchrow(
+            "SELECT * FROM resolve_tron_deposit_order($1)",
+            payload.order_no,
+        )
+    if not deposit or not deposit["deposit_address"] or deposit["derivation_index"] is None:
+        raise HTTPException(status_code=404, detail="TRC20 deposit order or source address not found")
+    if deposit["status"] not in {"PAID", "REVIEW"}:
+        raise HTTPException(status_code=409, detail="Only paid or review-required TRC20 orders can be swept")
+
+    quote_url = settings.tron_sweep_signer_url.rstrip("/") + "/v1/tron/usdt/quote"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                quote_url,
+                json={
+                    "order_no": payload.order_no,
+                    "derivation_index": int(deposit["derivation_index"]),
+                    "from_address": deposit["deposit_address"],
+                    "to_address": settings.tron_treasury_address,
+                    "token_contract": settings.tron_usdt_contract,
+                },
+                headers={"Authorization": f"Bearer {settings.tron_sweep_signer_token}"},
+            )
+        response.raise_for_status()
+        quote = response.json()
+        available_amount = int(quote["available_amount_minor"])
+        estimated_fee = int(quote["estimated_fee_sun"])
+        can_sweep = bool(quote.get("can_sweep", True))
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=502, detail="TRC20 signer could not quote the sweep") from exc
+
+    if available_amount <= 0:
+        raise HTTPException(status_code=409, detail="No confirmed USDT balance is available at this address")
+    if estimated_fee < 0 or estimated_fee > settings.tron_sweep_max_fee_sun:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Estimated fee exceeds the configured maximum",
+                "estimated_fee_sun": estimated_fee,
+                "maximum_fee_sun": settings.tron_sweep_max_fee_sun,
+            },
+        )
+    if not can_sweep:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Signer reports insufficient TRX/resources for the sweep",
+                "estimated_fee_sun": estimated_fee,
+                "available_trx_sun": quote.get("available_trx_sun"),
+            },
+        )
+
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('app.tenant_id', $1, true)",
+                str(deposit["tenant_id"]),
+            )
+            existing = await conn.fetchrow(
+                """
+                SELECT * FROM tron_sweep_jobs
+                WHERE tenant_id = $1 AND topup_order_id = $2
+                FOR UPDATE
+                """,
+                deposit["tenant_id"],
+                deposit["id"],
+            )
+            if existing:
+                return {
+                    "status": existing["status"],
+                    "job_id": str(existing["id"]),
+                    "amount_minor": existing["amount_minor"],
+                    "fee_sun": existing["fee_sun"],
+                }
+            job = await conn.fetchrow(
+                """
+                INSERT INTO tron_sweep_jobs (
+                    tenant_id, topup_order_id, source_address,
+                    derivation_index, destination_address, token_contract,
+                    amount_minor, max_fee_sun, fee_sun, requested_by, reason
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                RETURNING id, status, amount_minor, fee_sun
+                """,
+                deposit["tenant_id"],
+                deposit["id"],
+                deposit["deposit_address"],
+                deposit["derivation_index"],
+                settings.tron_treasury_address,
+                settings.tron_usdt_contract,
+                available_amount,
+                settings.tron_sweep_max_fee_sun,
+                estimated_fee,
+                principal.user_id,
+                payload.reason,
+            )
+            await conn.execute(
+                """
+                INSERT INTO audit_logs (
+                    tenant_id, actor_user_id, action, resource_type,
+                    resource_id, details
+                )
+                VALUES ($1, $2, 'TRON_SWEEP_MANUALLY_QUEUED',
+                        'tron_sweep_job', $3, $4::jsonb)
+                """,
+                deposit["tenant_id"],
+                principal.user_id,
+                job["id"],
+                json.dumps({
+                    "order_no": payload.order_no,
+                    "source_address": deposit["deposit_address"],
+                    "destination_address": settings.tron_treasury_address,
+                    "amount_minor": available_amount,
+                    "estimated_fee_sun": estimated_fee,
+                    "max_fee_sun": settings.tron_sweep_max_fee_sun,
+                    "reason": payload.reason,
+                }),
+            )
+    return {
+        "status": job["status"],
+        "job_id": str(job["id"]),
+        "amount_minor": job["amount_minor"],
+        "fee_sun": job["fee_sun"],
+    }
 
 
 @router.get("/admin/billing/payment-methods")
