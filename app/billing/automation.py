@@ -179,11 +179,22 @@ async def get_auto_renew_settings(
                 """
                 SELECT ar.enabled, ar.currency, ar.duration_days, ar.timezone,
                        ar.last_price_minor, ar.last_price_version,
-                       s.expires_at, p.code AS plan_code, p.name AS plan_name
+                       s.expires_at, p.code AS plan_code, p.name AS plan_name,
+                       ri.status AS renewal_status,
+                       ri.next_attempt_at AS renewal_next_attempt_at,
+                       ri.last_error_code AS renewal_last_error_code
                 FROM tenant_auto_renew_settings ar
                 JOIN tenant_subscriptions s
                   ON s.tenant_id = ar.tenant_id AND s.id = ar.subscription_id
                 JOIN membership_plans p ON p.id = s.plan_id
+                LEFT JOIN LATERAL (
+                    SELECT status, next_attempt_at, last_error_code
+                    FROM subscription_renewal_intents
+                    WHERE tenant_id = ar.tenant_id
+                      AND subscription_id = ar.subscription_id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) ri ON TRUE
                 WHERE ar.tenant_id = $1
                 """,
                 principal.tenant_id,
@@ -200,6 +211,9 @@ async def get_auto_renew_settings(
         "expires_at": row["expires_at"],
         "last_price_minor": row["last_price_minor"],
         "last_price_version": row["last_price_version"],
+        "renewal_status": row["renewal_status"],
+        "renewal_next_attempt_at": row["renewal_next_attempt_at"],
+        "renewal_last_error_code": row["renewal_last_error_code"],
     }
 
 
