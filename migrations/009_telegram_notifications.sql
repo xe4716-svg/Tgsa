@@ -4,26 +4,30 @@
 BEGIN;
 
 CREATE TABLE tenant_telegram_notification_links (
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL,
+    user_id UUID NOT NULL,
     telegram_user_id BIGINT NOT NULL,
     chat_id BIGINT NOT NULL,
     username VARCHAR(64),
     linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_message_at TIMESTAMPTZ,
     PRIMARY KEY (tenant_id, user_id),
-    UNIQUE (tenant_id, telegram_user_id)
+    UNIQUE (tenant_id, telegram_user_id),
+    FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships(tenant_id, user_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_telegram_notification_links_user
     ON tenant_telegram_notification_links(user_id, tenant_id);
 
 CREATE TABLE tenant_telegram_link_tokens (
     token_hash CHAR(64) PRIMARY KEY,
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL,
+    user_id UUID NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     used_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships(tenant_id, user_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_telegram_link_tokens_expiry
     ON tenant_telegram_link_tokens(expires_at)
@@ -31,8 +35,8 @@ CREATE INDEX idx_telegram_link_tokens_expiry
 
 CREATE TABLE telegram_notification_outbox (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL,
+    user_id UUID NOT NULL,
     dedupe_key VARCHAR(160) NOT NULL,
     message_text TEXT NOT NULL CHECK (length(message_text) BETWEEN 1 AND 4096),
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
@@ -44,7 +48,9 @@ CREATE TABLE telegram_notification_outbox (
     sent_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, dedupe_key)
+    UNIQUE (tenant_id, dedupe_key),
+    FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships(tenant_id, user_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_telegram_notification_outbox_due
     ON telegram_notification_outbox(status, next_attempt_at, created_at)
