@@ -100,6 +100,15 @@ jobs:
           test "$CLAIMED" = "$TOPUP_ORDER_NO"
           TOPUP_VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); SELECT COUNT(*) FROM wallet_topup_orders; COMMIT" | tail -n 1)
           test "$TOPUP_VISIBLE" = "1"
+          RESOLVED_DEPOSIT=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT deposit_address || '|' || derivation_index::text FROM resolve_tron_deposit_order('$TOPUP_ORDER_NO')")
+          test "$RESOLVED_DEPOSIT" = "TQCiTestDepositAddress0000000000000|999999999"
+          SWEEP_ID=$(psql -h localhost -U postgres -d tgs -Atqc "INSERT INTO tron_sweep_jobs(tenant_id, topup_order_id, source_address, derivation_index, destination_address, token_contract, amount_minor, max_fee_sun, reason) SELECT '$TENANT_A', id, deposit_address, derivation_index, 'TQCiTreasuryAddress000000000000000', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount_minor, 1000000, 'CI sweep queue test' FROM wallet_topup_orders WHERE order_no = '$TOPUP_ORDER_NO' RETURNING id")
+          CLAIMED_SWEEP=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT id FROM claim_pending_tron_sweeps(10)")
+          test "$CLAIMED_SWEEP" = "$SWEEP_ID"
+          SWEEP_COUNT=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT COUNT(*) FROM list_tron_sweep_jobs(NULL, 100)")
+          test "$SWEEP_COUNT" = "1"
+          SWEEP_VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); SELECT COUNT(*) FROM tron_sweep_jobs; COMMIT" | tail -n 1)
+          test "$SWEEP_VISIBLE" = "1"
           if PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -v ON_ERROR_STOP=1 -c "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); INSERT INTO wallet_topup_orders(tenant_id, order_no, provider, idempotency_key, request_fingerprint, currency, amount_minor, expires_at) VALUES ('$TENANT_B', 'ci-cross-tenant-topup', 'USDT', 'ci-cross-tenant-idempotency', repeat('b', 64), 'USDT', 10000000, NOW() + INTERVAL '1 day'); COMMIT"; then
             echo "Cross-tenant top-up write unexpectedly succeeded"
             exit 1
