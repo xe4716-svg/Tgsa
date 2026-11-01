@@ -103,6 +103,19 @@ BEGIN
         RETURN FALSE;
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+        FROM users u
+        JOIN tenants t ON t.id = v_tenant_id
+        JOIN tenant_memberships tm
+          ON tm.tenant_id = v_tenant_id AND tm.user_id = v_user_id
+        WHERE u.id = v_user_id
+          AND u.status = 'ACTIVE'
+          AND t.status = 'ACTIVE'
+    ) THEN
+        RETURN FALSE;
+    END IF;
+
     SELECT l.user_id
     INTO existing_user_id
     FROM tenant_telegram_notification_links l
