@@ -1,0 +1,13 @@
+# 群管理启停控制
+
+新增app/moderation_control.py与两个接口：GET /api/moderation/configs列出本工作区配置；POST /api/moderation/configs/{id}/state提交enabled及可选sandbox。查看要求moderation.read，启停要求moderation.manage；网页登录写请求沿用CSRF和会话校验，操作者必须是有效成员。
+
+启用先核对现有Bot、group_manage绑定、群管理实例及目的群有效状态，再按当前策略、欢迎/验证和规则计算所需权限。真实适配器使用getMe确认Bot身份，getChat确认群ID/类型，getChatMember确认当前成员身份及具体权限。受限成员的个人权限不能被群默认权限替代；普通群管理员可删消息，但不虚构超级群才支持的禁言能力。
+
+预检在数据库事务外执行，避免网络等待持有业务行锁。提交时重新读取配置、规则、Bot、绑定、实例、群组及操作者；任何预检期间已观察到的变更都拒绝本次启用。提交时锁住配置及规则行。不能保证其他管理员在最后一次检查之后不会改变远端权限或本地其他依赖；实际工作器仍在每次动作前重新检查有效性和权限。本功能不能宣称跨Telegram与数据库的原子授权。
+
+停用只更新enabled和updated_at，不要求远程凭据或有效执行器，不同时改变身份/策略。沿用004b已验证的停用触发器例外。工作器遇到停用配置会取消尚未执行的普通任务，验证限制的安全清理继续遵循已有所有权检查；已经发出的远端操作不能撤回。
+
+sandbox=true仅在sandbox运行模式允许。响应与审计标记sandbox_simulated，模拟权限不写入真实bot_destination_access检查时间或权限字段。默认不模拟，必须有已登记凭据才可使用真实预检。测试注入适配器单独标为injected_test_adapter，不能作为实网证据。
+
+本轮无新增SQL或数据库迁移，原001～003保持不变。测试结果见MODERATION_CONTROL_TEST_RESULTS.xml，最新空库全量177项仍是上一个发布快照；不能用其数量冒充本轮代码全量重新执行。未提供真实Bot凭据，实网预检与浏览器操作尚未执行。

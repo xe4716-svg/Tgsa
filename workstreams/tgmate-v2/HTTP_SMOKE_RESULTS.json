@@ -1,0 +1,8 @@
+{
+  "health": true,
+  "unauthenticated_api_denied": true,
+  "page_served": true,
+  "authenticated_overview": true,
+  "network": "loopback only",
+  "telegram_called": false
+}
