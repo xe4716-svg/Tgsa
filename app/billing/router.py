@@ -332,6 +332,7 @@ async def assign_subscription(
             keep_auto_renew = bool(
                 current
                 and current["plan_id"] == plan["id"]
+                and current["status"] in {"ACTIVE", "TRIALING"}
                 and current["expires_at"] is not None
                 and current["expires_at"] > db_now
             )
