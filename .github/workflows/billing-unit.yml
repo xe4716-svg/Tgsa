@@ -139,4 +139,7 @@ jobs:
           test "$RENEWAL_VISIBLE" = "1"
           PREF_VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_C', true); INSERT INTO tenant_billing_preferences(tenant_id, timezone) VALUES ('$TENANT_C', 'America/Los_Angeles'); SELECT timezone FROM tenant_billing_preferences; COMMIT" | tail -n 1)
           test "$PREF_VISIBLE" = "America/Los_Angeles"
+          psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "INSERT INTO billing_email_outbox(tenant_id, user_id, dedupe_key, subject, body) VALUES ('$TENANT_C', '$USER_C', 'ci-email-outbox', 'CI billing email', 'CI billing outbox smoke test')"
+          EMAILS_CLAIMED=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT COUNT(*) FROM claim_due_billing_emails(50)")
+          test "$EMAILS_CLAIMED" = "1"
 
