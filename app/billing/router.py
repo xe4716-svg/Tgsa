@@ -344,7 +344,10 @@ async def assign_subscription(
                     "plan_code": plan["code"],
                     "duration_days": payload.duration_days,
                     "previous_plan_code": current["current_plan_code"] if current else None,
-                    "previous_expires_at": current["expires_at"] if current else None,
+                    "previous_expires_at": (
+                        current["expires_at"].isoformat()
+                        if current and current["expires_at"] else None
+                    ),
                     "effective_start_at": starts_at.isoformat(),
                     "effective_end_at": expires_at.isoformat() if expires_at else None,
                 }),
