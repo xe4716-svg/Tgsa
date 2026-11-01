@@ -41,6 +41,11 @@ CREATE TABLE tenant_billing_preferences (
 ALTER TABLE tenant_subscriptions
     ADD COLUMN expiry_notified_at TIMESTAMPTZ;
 
+CREATE INDEX idx_subscription_expiry_automation
+    ON tenant_subscriptions(expires_at, tenant_id)
+    WHERE expires_at IS NOT NULL
+      AND status IN ('ACTIVE', 'TRIALING', 'PAST_DUE', 'EXPIRED');
+
 CREATE TABLE tenant_auto_renew_settings (
     tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
     subscription_id UUID NOT NULL,
