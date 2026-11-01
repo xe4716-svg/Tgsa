@@ -394,7 +394,7 @@ AS $reminders$
     WHERE s.expires_at IS NOT NULL
       AND s.status IN ('ACTIVE', 'TRIALING', 'PAST_DUE', 'EXPIRED')
       AND (
-          s.expires_at <= NOW() + INTERVAL '31 days'
+          s.expires_at <= NOW() + INTERVAL '366 days'
           OR (s.status = 'EXPIRED' AND s.expiry_notified_at IS NULL)
       )
     ORDER BY s.expires_at
