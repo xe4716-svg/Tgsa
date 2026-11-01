@@ -43,10 +43,7 @@ async def load_entitlements(
         JOIN membership_plans p ON p.id = s.plan_id
         WHERE s.tenant_id = $1
           AND s.starts_at <= NOW()
-          AND (
-              s.status IN ('ACTIVE', 'TRIALING')
-              OR (s.status = 'PAST_DUE' AND s.grace_until > NOW())
-          )
+          AND s.status IN ('ACTIVE', 'TRIALING')
           AND (s.expires_at IS NULL OR s.expires_at > NOW())
         ORDER BY s.starts_at DESC
         LIMIT 1
