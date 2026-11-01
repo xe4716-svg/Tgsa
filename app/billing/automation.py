@@ -1542,6 +1542,7 @@ async def _send_due_telegram_notifications(pool, lock_conn) -> None:
             status = "SENT"
             error_code = None
             retry_after = None
+            link_invalid = False
             try:
                 response = await client.post(
                     f"{api_base}/sendMessage",
@@ -1565,6 +1566,7 @@ async def _send_due_telegram_notifications(pool, lock_conn) -> None:
                         retry_after = int(parameters.get("retry_after") or 60)
                     if response.status_code == 403 or result.get("error_code") == 403:
                         status = "FAILED"
+                        link_invalid = True
                     else:
                         status = "FAILED" if int(row["attempt_count"]) >= 5 else "PENDING"
                 else:
@@ -1597,10 +1599,12 @@ async def _send_due_telegram_notifications(pool, lock_conn) -> None:
                             user_id,
                         )
                     else:
-                        if error_code and (
-                            "blocked by the user" in error_code.lower()
-                            or "chat not found" in error_code.lower()
-                            or "bot was blocked" in error_code.lower()
+                        if link_invalid or (
+                            error_code and (
+                                "blocked by the user" in error_code.lower()
+                                or "chat not found" in error_code.lower()
+                                or "bot was blocked" in error_code.lower()
+                            )
                         ):
                             await conn.execute(
                                 """
