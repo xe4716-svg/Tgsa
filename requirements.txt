@@ -8,3 +8,4 @@ python-socks[asyncio]>=2.7,<3
 aiosmtplib>=3,<5
 pytest>=8,<9
 httpx>=0.27,<1
+bip-utils>=2.9,<3
