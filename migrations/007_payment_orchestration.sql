@@ -182,8 +182,10 @@ AS $sweep$
     WITH due AS (
         SELECT j.id
         FROM tron_sweep_jobs j
-        WHERE j.status IN ('PENDING', 'RETRY')
-          AND j.next_attempt_at <= NOW()
+        WHERE (
+              (j.status IN ('PENDING', 'RETRY') AND j.next_attempt_at <= NOW())
+              OR (j.status = 'PROCESSING' AND j.updated_at < NOW() - INTERVAL '5 minutes')
+          )
         ORDER BY j.next_attempt_at, j.created_at
         FOR UPDATE SKIP LOCKED
         LIMIT LEAST(GREATEST(COALESCE(p_limit, 10), 1), 100)
