@@ -238,7 +238,7 @@ async def update_auto_renew_settings(
                     SET status = 'CANCELED', updated_at = NOW(),
                         last_error_code = 'AUTO_RENEW_DISABLED'
                     WHERE tenant_id = $1
-                      AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                      AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY', 'FAILED')
                     """,
                     principal.tenant_id,
                 )
@@ -370,7 +370,7 @@ async def update_auto_renew_settings(
                 SET status = 'CANCELED', updated_at = NOW(),
                     last_error_code = 'AUTO_RENEW_SETTINGS_CHANGED'
                 WHERE tenant_id = $1
-                  AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                  AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY', 'FAILED')
                 """,
                 principal.tenant_id,
             )
@@ -1124,7 +1124,7 @@ async def _process_expiry_reminders(pool) -> None:
                             last_error_code = 'SUBSCRIPTION_EXPIRED',
                             updated_at = NOW()
                         WHERE tenant_id = $1 AND subscription_id = $2
-                          AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                          AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY', 'FAILED')
                         """,
                         tenant_id,
                         subscription_id,
