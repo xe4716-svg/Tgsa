@@ -44,6 +44,8 @@
 - GET /billing/wallet/topups/{order_no}：查看单笔充值订单。
 - GET /billing/auto-renew、PUT /billing/auto-renew：查看/开启/关闭自动续费；开启时选择币种、周期和时区。
 - GET/PUT /billing/notification-preferences：设置通知时区与邮件通知。
+- GET/POST/DELETE /billing/telegram-link：查看、生成绑定链接或解除当前用户的 Telegram 通知绑定。
+- POST /webhooks/platform-telegram：Telegram Bot 更新 Webhook（仅接受配置的 Secret Token）。
 - GET /billing/notifications：查看站内通知；POST /billing/notifications/{notification_id}/read：标记已读。
 
 在线充值请求必须携带客户端生成的 idempotency_key（至少 16 个字符）。同一租户重复提交同一幂等键和相同请求，只返回原订单；同一幂等键对应不同金额、币种、渠道则拒绝。
@@ -116,7 +118,7 @@
 - 各商户真实账号/证书配置后的沙箱与生产小额联调；当前仓库没有真实商户密钥。
 - TRC20 自动归集：用户已确认的每地址达到 10 USDT 才归集，低于门槛留在原地址。归集必须接入独立签名器/HSM 或受控热钱包服务，不能把助记词/私钥放进普通 API 环境。
 - 充值退款、信用卡拒付、资金冻结与账务冲正。
-- Telegram Bot 到期/续费通知通道。
+- Telegram Bot 凭据配置、Webhook 注册与真实 Telegram 私聊发送验收。
 - 到期后实际 Telegram 任务暂停、续费后资源选择与 Worker 安全恢复（当前仓库还没有完整任务执行 Worker）。
 - 前端钱包充值 UI、支付二维码渲染和订单状态轮询。
 
@@ -124,8 +126,8 @@
 
 ## 6. 部署
 
-迁移顺序为 001 至 008。新 PostgreSQL 数据卷会由 Docker 初始化脚本按文件名顺序执行迁移。已有数据卷不会因为重新启动容器而自动执行新增迁移；部署前需备份数据库，并由数据库管理员在维护窗口依次执行尚未应用的迁移。
+迁移顺序为 001 至 009。新 PostgreSQL 数据卷会由 Docker 初始化脚本按文件名顺序执行迁移。已有数据卷不会因为重新启动容器而自动执行新增迁移；部署前需备份数据库，并由数据库管理员在维护窗口依次执行尚未应用的迁移。
 
 新增环境变量见 .env.example。生产必须设置 HTTPS 的 PUBLIC_API_BASE_URL 与 PAYMENT_RETURN_URL；支付私钥、API key 和平台证书放在 Secret Manager，不要提交到 GitHub。TRC20 需要设置 TRON_ACCOUNT_XPUB、TRONGRID_API_KEY，并在确认 watcher 可用后设置 TRON_WATCHER_ENABLED=true。TRON_ACCOUNT_XPUB 只能是 m/44'/195'/0' 或 m/44'/195'/0'/0 的扩展公钥，禁止填入 xprv、助记词或种子。
 
-GitHub Actions 在 PostgreSQL 16 中执行 001–008 全部迁移、账务单元测试、支付签名测试、TRON xpub 派生测试和自动续费提醒测试，并验证租户 RLS、续费意图领取、提醒收件人查询、支付订单解析函数和钱包流水不可修改。
+GitHub Actions 在 PostgreSQL 16 中执行 001–009 全部迁移、账务单元测试、支付签名测试、TRON xpub 派生测试和自动续费提醒测试，并验证租户 RLS、续费意图领取、提醒收件人查询、支付订单解析函数和钱包流水不可修改。
