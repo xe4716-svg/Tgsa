@@ -128,6 +128,11 @@ jobs:
           test "$CREATED_INTENTS" = "1"
           CLAIMED_INTENTS=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT COUNT(*) FROM claim_due_auto_renew_intents(50)")
           test "$CLAIMED_INTENTS" = "1"
+          psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "UPDATE subscription_renewal_intents SET status = 'CANCELED' WHERE tenant_id = '$TENANT_C'"
+          REACTIVATED_INTENTS=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT create_due_auto_renew_intents(100)")
+          test "$REACTIVATED_INTENTS" = "1"
+          RECLAIMED_INTENTS=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT COUNT(*) FROM claim_due_auto_renew_intents(50)")
+          test "$RECLAIMED_INTENTS" = "1"
           REMINDER_RECIPIENTS=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT COUNT(*) FROM list_billing_reminder_recipients(5000) WHERE tenant_id = '$TENANT_C' AND user_id = '$USER_C' AND email IS NOT NULL")
           test "$REMINDER_RECIPIENTS" = "1"
           RENEWAL_VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_C', true); SELECT COUNT(*) FROM subscription_renewal_intents; COMMIT" | tail -n 1)
