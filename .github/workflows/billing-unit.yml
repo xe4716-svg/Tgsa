@@ -92,3 +92,15 @@ jobs:
             echo "Wallet ledger update unexpectedly succeeded"
             exit 1
           fi
+          TOPUP_ORDER_NO="ci-tron-$(echo "$TENANT_A" | cut -c1-8)"
+          psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "INSERT INTO wallet_topup_orders(tenant_id, order_no, provider, idempotency_key, request_fingerprint, currency, amount_minor, expires_at, deposit_address, derivation_index) VALUES ('$TENANT_A', '$TOPUP_ORDER_NO', 'USDT', 'ci-tron-topup-idempotency', repeat('a', 64), 'USDT', 10000000, NOW() + INTERVAL '1 day', 'TQCiTestDepositAddress0000000000000', 999999999)"
+          RESOLVED=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT tenant_id::text || '|' || amount_minor::text FROM resolve_wallet_topup_order('$TOPUP_ORDER_NO')")
+          test "$RESOLVED" = "$TENANT_A|10000000"
+          CLAIMED=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "SELECT order_no FROM claim_pending_tron_deposits(10)")
+          test "$CLAIMED" = "$TOPUP_ORDER_NO"
+          TOPUP_VISIBLE=$(PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -Atqc "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); SELECT COUNT(*) FROM wallet_topup_orders; COMMIT" | tail -n 1)
+          test "$TOPUP_VISIBLE" = "1"
+          if PGPASSWORD="$APP_DB_PASSWORD" psql -h localhost -U tgs_runtime -d tgs -v ON_ERROR_STOP=1 -c "BEGIN; SELECT set_config('app.tenant_id', '$TENANT_A', true); INSERT INTO wallet_topup_orders(tenant_id, order_no, provider, idempotency_key, request_fingerprint, currency, amount_minor, expires_at) VALUES ('$TENANT_B', 'ci-cross-tenant-topup', 'USDT', 'ci-cross-tenant-idempotency', repeat('b', 64), 'USDT', 10000000, NOW() + INTERVAL '1 day'); COMMIT"; then
+            echo "Cross-tenant top-up write unexpectedly succeeded"
+            exit 1
+          fi
