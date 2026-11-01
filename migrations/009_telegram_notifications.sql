@@ -176,6 +176,12 @@ BEGIN
     LOOP
         removed_count := removed_count + 1;
 
+        UPDATE tenant_telegram_link_tokens
+        SET used_at = COALESCE(used_at, NOW())
+        WHERE tenant_id = item.tenant_id
+          AND user_id = item.user_id
+          AND used_at IS NULL;
+
         UPDATE tenant_billing_preferences p
         SET telegram_notifications_enabled = EXISTS (
                 SELECT 1
