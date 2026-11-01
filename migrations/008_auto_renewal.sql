@@ -55,7 +55,9 @@ CREATE TABLE tenant_auto_renew_settings (
     updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (tenant_id, subscription_id)
-        REFERENCES tenant_subscriptions(tenant_id, id) ON DELETE CASCADE
+        REFERENCES tenant_subscriptions(tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships(tenant_id, user_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_auto_renew_enabled
     ON tenant_auto_renew_settings(enabled, subscription_id)
@@ -94,6 +96,8 @@ CREATE TABLE subscription_renewal_intents (
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, subscription_id)
         REFERENCES tenant_subscriptions(tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships(tenant_id, user_id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, paid_order_id)
         REFERENCES billing_orders(tenant_id, id)
 );
@@ -112,7 +116,9 @@ CREATE TABLE tenant_notifications (
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, user_id, dedupe_key)
+    UNIQUE (tenant_id, user_id, dedupe_key),
+    FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships(tenant_id, user_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_tenant_notifications_user_time
     ON tenant_notifications(tenant_id, user_id, created_at DESC);
@@ -133,7 +139,9 @@ CREATE TABLE billing_email_outbox (
     sent_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, dedupe_key)
+    UNIQUE (tenant_id, dedupe_key),
+    FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships(tenant_id, user_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_billing_email_outbox_due
     ON billing_email_outbox(status, next_attempt_at, created_at)
