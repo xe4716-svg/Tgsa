@@ -25,9 +25,12 @@ on:
       - 'tests/test_billing_commerce.py'
       - 'tests/test_payment_gateway.py'
       - 'tests/test_tron_watcher.py'
+      - 'tests/test_billing_automation.py'
+      - 'app/billing/automation.py'
       - 'app/billing/tron_watcher.py'
       - 'migrations/006_wallet_commerce.sql'
       - 'migrations/007_payment_orchestration.sql'
+      - 'migrations/008_auto_renewal.sql'
       - 'app/billing/payment_gateway.py'
       - 'app/billing/payments.py'
       - 'app/main.py'
@@ -61,7 +64,7 @@ jobs:
       - name: Compile billing sources
         run: python -m compileall -q app/billing tests/test_billing_entitlements.py tests/test_billing_commerce.py tests/test_payment_gateway.py tests/test_tron_watcher.py tests/test_billing_automation.py
       - name: Run billing unit tests
-        run: python -m pytest -q tests/test_billing_entitlements.py tests/test_billing_commerce.py tests/test_payment_gateway.py tests/test_tron_watcher.py
+        run: python -m pytest -q tests/test_billing_entitlements.py tests/test_billing_commerce.py tests/test_payment_gateway.py tests/test_tron_watcher.py tests/test_billing_automation.py
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Apply all database migrations
