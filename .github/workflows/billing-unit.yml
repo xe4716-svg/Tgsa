@@ -6,6 +6,7 @@ on:
       - 'app/billing/**'
       - 'tests/test_billing_entitlements.py'
       - 'tests/test_billing_commerce.py'
+      - 'tests/test_payment_gateway.py'
       - 'migrations/006_wallet_commerce.sql'
       - 'migrations/007_payment_orchestration.sql'
       - 'app/billing/payment_gateway.py'
