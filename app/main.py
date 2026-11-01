@@ -68,6 +68,6 @@ async def root():
         "service": settings.app_name,
         "version": "1.0.0-foundation",
         "status": "running",
-        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration", "tron_usdt_watcher", "auto_renewal", "billing_notifications"],
+        "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration", "tron_usdt_watcher", "auto_renewal", "billing_notifications", "telegram_notifications"],
         "note": "Telegram integrations are not enabled until deployment secrets and integration tests are complete.",
     }
