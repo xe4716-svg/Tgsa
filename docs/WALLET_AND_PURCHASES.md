@@ -71,12 +71,22 @@
 
 - 默认关闭；只有租户 OWNER/ADMIN 可以开启或关闭。仅支持有效的付费、有限期订阅，且续费币种必须与剩余已付款会员价值币种一致。
 - 默认在到期前 3 天创建续费意图，自动从钱包扣款；不直接从银行卡/第三方支付渠道扣款。
-- 余额不足进入 WAITING_FOR_BALANCE，不产生负余额；钱包充值或超管人工入账后会唤醒待处理意图。
+- 余额不足进入 WAITING_FOR_BALANCE，不产生负余额；钱包充值或超管人工入账后会唤醒待处理意图，并发送站内/已验证邮箱通知，以及用户主动绑定后发送的 Telegram Bot 通知。
 - 到期前仍未到账不会扣款；订阅过期后自动续费关闭，用户必须手动选择套餐。
 - 技术异常最多重试 3 次；余额不足不是技术重试。价格金额发生变化时，先发送站内/邮件通知并等待超管配置的通知时长，等待期内用户可关闭自动续费。
 - 默认到期提醒为 7/3/1/0 天，可由超管配置提醒节点；时区可使用租户明确设置的 IANA 时区或平台统一时区。
 - API 启动后由 PostgreSQL advisory lock 选出单一自动化 Worker 负责续费意图、到期状态、提醒和邮件 outbox；多 API 副本不会同时执行同一调度。
-- 站内通知与 SMTP 邮件已实现；Telegram Bot 通知尚未接入。
+- 站内通知、SMTP 邮件和 Telegram Bot 消息均已实现可选绑定及可靠 outbox。Telegram 仅向用户主动绑定的私聊发送；发送 /stop 或在账户设置解除绑定即可停止。
+
+Telegram 部署需设置 PLATFORM_TELEGRAM_BOT_TOKEN、PLATFORM_TELEGRAM_BOT_USERNAME、PLATFORM_TELEGRAM_WEBHOOK_SECRET（至少 32 位随机字符），并注册 Webhook。示例：
+
+\`\`\`bash
+curl -X POST "https://api.telegram.org/bot\${PLATFORM_TELEGRAM_BOT_TOKEN}/setWebhook" \\
+  -d "url=https://你的API域名/webhooks/platform-telegram" \\
+  -d "secret_token=\${PLATFORM_TELEGRAM_WEBHOOK_SECRET}"
+\`\`\`
+
+未绑定的用户不会收到 Telegram 消息。
 
 ### 超级管理员侧
 
