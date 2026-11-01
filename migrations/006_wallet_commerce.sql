@@ -2,6 +2,8 @@
 -- Currency amounts are integer minor units: CNY/USD use cents; USDT uses 1e-6 USDT.
 -- Apply after 005_entitlement_overrides.sql.
 
+BEGIN;
+
 ALTER TABLE tenant_subscriptions
     DROP CONSTRAINT IF EXISTS tenant_subscriptions_status_check;
 ALTER TABLE tenant_subscriptions
@@ -74,7 +76,9 @@ CREATE TABLE billing_orders (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, idempotency_key),
-    UNIQUE (tenant_id, id)
+    UNIQUE (tenant_id, id),
+    CHECK (upgrade_credit_minor <= list_amount_minor),
+    CHECK (payable_amount_minor = list_amount_minor - upgrade_credit_minor)
 );
 CREATE INDEX idx_billing_orders_tenant_time
     ON billing_orders(tenant_id, created_at DESC);
@@ -96,7 +100,11 @@ CREATE TABLE wallet_ledger_entries (
     reason VARCHAR(500) NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, idempotency_key)
+    UNIQUE (tenant_id, idempotency_key),
+    CHECK (
+        (direction = 'CREDIT' AND entry_type IN ('ADMIN_CREDIT', 'REFUND_CREDIT'))
+        OR (direction = 'DEBIT' AND entry_type IN ('ADMIN_DEBIT', 'PURCHASE_DEBIT'))
+    )
 );
 CREATE INDEX idx_wallet_ledger_tenant_time
     ON wallet_ledger_entries(tenant_id, created_at DESC);
@@ -121,6 +129,8 @@ CREATE TABLE subscription_terms (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (ends_at > starts_at),
     UNIQUE (tenant_id, id),
+    CHECK (upgrade_credit_minor <= gross_amount_minor),
+    CHECK (net_paid_minor = gross_amount_minor - upgrade_credit_minor),
     FOREIGN KEY (tenant_id, order_id)
         REFERENCES billing_orders(tenant_id, id)
 );
@@ -171,3 +181,5 @@ GRANT SELECT, INSERT ON wallet_ledger_entries TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON subscription_terms TO tgs_runtime;
 GRANT SELECT, INSERT ON platform_audit_logs TO tgs_runtime;
 REVOKE UPDATE, DELETE ON wallet_ledger_entries FROM tgs_runtime;
+
+COMMIT;
