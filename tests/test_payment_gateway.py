@@ -4,6 +4,7 @@ import hmac
 import json
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from cryptography import x509
@@ -17,7 +18,7 @@ from app.billing import payment_gateway as gateway
 
 def test_stripe_webhook_signature_and_payment_details(monkeypatch):
     secret = "whsec_test_secret"
-    monkeypatch.setattr(gateway.settings, "stripe_webhook_secret", secret)
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(stripe_webhook_secret=secret))
     event = {
         "id": "evt_123",
         "type": "checkout.session.completed",
@@ -51,7 +52,7 @@ def test_stripe_webhook_signature_and_payment_details(monkeypatch):
 
 
 def test_stripe_rejects_tampered_payload(monkeypatch):
-    monkeypatch.setattr(gateway.settings, "stripe_webhook_secret", "whsec_test")
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(stripe_webhook_secret="whsec_test"))
     raw = b'{"id":"evt_1","type":"checkout.session.completed"}'
     timestamp = str(int(time.time()))
     with pytest.raises(gateway.PaymentVerificationError):
@@ -74,8 +75,9 @@ def _make_rsa_keypair():
 
 def test_alipay_rsa2_notification_signature(monkeypatch):
     private_key, _, public_pem = _make_rsa_keypair()
-    monkeypatch.setattr(gateway.settings, "alipay_app_id", "app_123")
-    monkeypatch.setattr(gateway.settings, "alipay_public_key_pem", public_pem)
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(
+        alipay_app_id="app_123", alipay_public_key_pem=public_pem
+    ))
     params = {
         "app_id": "app_123",
         "out_trade_no": "order_123",
@@ -99,8 +101,9 @@ def test_alipay_rsa2_notification_signature(monkeypatch):
 
 def test_alipay_rejects_wrong_app_id(monkeypatch):
     _, _, public_pem = _make_rsa_keypair()
-    monkeypatch.setattr(gateway.settings, "alipay_app_id", "expected_app")
-    monkeypatch.setattr(gateway.settings, "alipay_public_key_pem", public_pem)
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(
+        alipay_app_id="expected_app", alipay_public_key_pem=public_pem
+    ))
     with pytest.raises(gateway.PaymentVerificationError):
         gateway.verify_alipay_notification({
             "app_id": "different_app",
@@ -112,7 +115,7 @@ def test_alipay_rejects_wrong_app_id(monkeypatch):
 def test_wechat_signature_and_aes_gcm_decryption(monkeypatch):
     private_key, _, _ = _make_rsa_keypair()
     api_key = "12345678901234567890123456789012"
-    monkeypatch.setattr(gateway.settings, "wechat_api_v3_key", api_key)
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(wechat_api_v3_key=api_key))
 
     subject = issuer = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, "CI WeChat Platform Test")
@@ -128,11 +131,9 @@ def test_wechat_signature_and_aes_gcm_decryption(monkeypatch):
         .not_valid_after(now + timedelta(days=1))
         .sign(private_key, hashes.SHA256())
     )
-    monkeypatch.setattr(
-        gateway.settings,
-        "wechat_platform_cert_pem",
-        certificate.public_bytes(serialization.Encoding.PEM).decode(),
-    )
+    gateway.settings.wechat_platform_cert_pem = certificate.public_bytes(
+        serialization.Encoding.PEM
+    ).decode()
 
     transaction = {
         "out_trade_no": "wechat_order_123",
@@ -175,7 +176,7 @@ def test_wechat_signature_and_aes_gcm_decryption(monkeypatch):
 
 def test_easypay_md5_callback_signature(monkeypatch):
     key = "epay_test_key"
-    monkeypatch.setattr(gateway.settings, "easypay_key", key)
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(easypay_key=key))
     params = {
         "pid": "10001",
         "out_trade_no": "epay_order_123",
@@ -201,8 +202,9 @@ def test_currency_minor_unit_conversion_is_exact():
 
 
 def test_usdt_provider_is_not_reported_ready_without_chain_watcher(monkeypatch):
-    monkeypatch.setattr(gateway.settings, "tron_account_xpub", "xpub-example")
-    monkeypatch.setattr(gateway.settings, "trongrid_api_key", "api-key")
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(
+        tron_account_xpub="xpub-example", trongrid_api_key="api-key"
+    ))
     ready, reason = gateway.provider_readiness("USDT")
     assert ready is False
     assert reason == "unsupported_provider"
