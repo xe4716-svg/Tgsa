@@ -39,8 +39,11 @@ class WalletCreditRequest(BaseModel):
 
 def _normalize_currency(currency: str) -> str:
     normalized = currency.strip().upper()
-    if not re.fullmatch(r"[A-Z][A-Z0-9]{2,7}", normalized):
-        raise HTTPException(status_code=422, detail="Invalid currency code")
+    if normalized not in {"CNY", "USD", "USDT"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Supported currencies are CNY, USD and USDT",
+        )
     return normalized
 
 
