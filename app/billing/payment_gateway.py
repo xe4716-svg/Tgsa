@@ -90,7 +90,7 @@ def provider_readiness(provider: str) -> tuple[bool, str | None]:
         ready = bool(
             settings.tron_account_xpub
             and settings.trongrid_api_key
-            and settings.tron_watcher_enabled
+            and getattr(settings, "tron_watcher_enabled", False)
         )
         if not ready:
             return False, "tron_xpub_api_key_or_watcher_not_configured"
