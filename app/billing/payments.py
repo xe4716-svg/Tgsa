@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import AuthPrincipal, get_current_principal
+from app.config import settings
 from app.billing.payment_gateway import (
     PaymentGatewayError,
     PaymentVerificationError,
@@ -826,7 +827,7 @@ async def _process_verified_payment(
 
             if provider == "USDT" and topup["amount_minor"] >= settings.tron_sweep_threshold_minor:
                 if topup["deposit_address"] and topup["derivation_index"] is not None and settings.tron_treasury_address:
-                    await conn.execute(
+                    sweep_job = await conn.fetchrow(
                         """
                         INSERT INTO tron_sweep_jobs (
                             tenant_id, topup_order_id, source_address,
@@ -835,6 +836,7 @@ async def _process_verified_payment(
                         )
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                         ON CONFLICT (tenant_id, topup_order_id) DO NOTHING
+                        RETURNING id
                         """,
                         tenant_id,
                         topup["id"],
@@ -846,24 +848,26 @@ async def _process_verified_payment(
                         settings.tron_sweep_max_fee_sun,
                         "Automatic per-address consolidation threshold reached",
                     )
-                    await conn.execute(
-                        """
-                        INSERT INTO audit_logs (
-                            tenant_id, actor_user_id, action, resource_type,
-                            resource_id, details
-                        )
-                        VALUES ($1, NULL, 'TRON_SWEEP_QUEUED', 'tron_sweep_job',
-                                NULL, $2::jsonb)
-                        """,
-                        tenant_id,
-                        json.dumps({
+                    if sweep_job:
+                        await conn.execute(
+                            """
+                            INSERT INTO audit_logs (
+                                tenant_id, actor_user_id, action, resource_type,
+                                resource_id, details
+                            )
+                            VALUES ($1, NULL, 'TRON_SWEEP_QUEUED', 'tron_sweep_job',
+                                    $2, $3::jsonb)
+                            """,
+                            tenant_id,
+                            sweep_job["id"],
+                            json.dumps({
                             "topup_order_id": str(topup["id"]),
                             "source_address": topup["deposit_address"],
                             "destination_address": settings.tron_treasury_address,
                             "amount_minor": topup["amount_minor"],
-                            "threshold_minor": settings.tron_sweep_threshold_minor,
-                        }),
-                    )
+                                "threshold_minor": settings.tron_sweep_threshold_minor,
+                            }),
+                        )
             await conn.execute(
                 """
                 UPDATE payment_webhook_events
