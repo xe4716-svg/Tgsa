@@ -7,6 +7,10 @@ on:
       - 'tests/test_billing_entitlements.py'
       - 'tests/test_billing_commerce.py'
       - 'migrations/006_wallet_commerce.sql'
+      - 'migrations/007_payment_orchestration.sql'
+      - 'app/billing/payment_gateway.py'
+      - 'app/billing/payments.py'
+      - 'app/main.py'
       - '.github/workflows/billing-unit.yml'
   pull_request:
     paths:
@@ -14,6 +18,9 @@ on:
       - 'tests/test_billing_entitlements.py'
       - 'tests/test_billing_commerce.py'
       - 'migrations/006_wallet_commerce.sql'
+      - 'migrations/007_payment_orchestration.sql'
+      - 'app/billing/payment_gateway.py'
+      - 'app/billing/payments.py'
       - 'app/main.py'
       - '.github/workflows/billing-unit.yml'
 
@@ -43,9 +50,9 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check pytest 'fastapi>=0.115,<1'
       - name: Compile billing sources
-        run: python -m compileall -q app/billing tests/test_billing_entitlements.py tests/test_billing_commerce.py
+        run: python -m compileall -q app/billing tests/test_billing_entitlements.py tests/test_billing_commerce.py tests/test_payment_gateway.py
       - name: Run billing unit tests
-        run: python -m pytest -q tests/test_billing_entitlements.py tests/test_billing_commerce.py
+        run: python -m pytest -q tests/test_billing_entitlements.py tests/test_billing_commerce.py tests/test_payment_gateway.py
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Apply all database migrations
@@ -59,6 +66,7 @@ jobs:
             psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -f "$migration"
           done
           psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM membership_plans"
+          psql -h localhost -U postgres -d tgs -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM payment_provider_configs"
       - name: Verify wallet RLS and immutable ledger permissions
         env:
           PGPASSWORD: postgres-test-password
