@@ -269,8 +269,8 @@ async def update_auto_renew_settings(
                 """,
                 principal.tenant_id,
             )
-            if not current:
-                raise HTTPException(status_code=409, detail="An active, time-limited membership is required")
+            if not current or current["plan_code"] == "FREE":
+                raise HTTPException(status_code=409, detail="An active paid, time-limited membership is required")
             currencies = await conn.fetch(
                 """
                 SELECT DISTINCT currency
@@ -671,6 +671,8 @@ async def _process_renewal_intent(pool, intent) -> None:
                 return
             if (
                 state["subscription_status"] not in {"ACTIVE", "TRIALING"}
+                or state["current_plan_id"] != state["plan_id"]
+                or state["current_plan_code"] != state["plan_code_snapshot"]
                 or state["expires_at"] is None
                 or state["expires_at"] <= await conn.fetchval("SELECT NOW()")
             ):
