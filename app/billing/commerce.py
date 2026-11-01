@@ -720,20 +720,22 @@ async def purchase_membership(
                     effective_end,
                 )
 
-            if quote["order_kind"] != "RENEWAL":
-                await conn.execute(
-                    """
-                    UPDATE tenant_auto_renew_settings
-                    SET enabled = FALSE, updated_at = NOW()
-                    WHERE tenant_id = $1
-                    """,
-                    principal.tenant_id,
-                )
+            is_auto_renew_purchase = payload.idempotency_key.startswith("auto-renew:")
+            if not is_auto_renew_purchase:
+                if quote["order_kind"] != "RENEWAL":
+                    await conn.execute(
+                        """
+                        UPDATE tenant_auto_renew_settings
+                        SET enabled = FALSE, updated_at = NOW()
+                        WHERE tenant_id = $1
+                        """,
+                        principal.tenant_id,
+                    )
                 await conn.execute(
                     """
                     UPDATE subscription_renewal_intents
                     SET status = 'CANCELED',
-                        last_error_code = 'SUBSCRIPTION_CHANGED',
+                        last_error_code = 'MANUAL_SUBSCRIPTION_CHANGE',
                         updated_at = NOW()
                     WHERE tenant_id = $1
                       AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY', 'FAILED')
