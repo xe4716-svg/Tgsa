@@ -318,7 +318,17 @@ VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $email$
-    WITH due AS (
+    WITH exhausted AS (
+        UPDATE billing_email_outbox o
+        SET status = 'FAILED',
+            last_error_code = 'MAX_ATTEMPTS_EXCEEDED',
+            updated_at = NOW()
+        WHERE o.status = 'PROCESSING'
+          AND o.updated_at < NOW() - INTERVAL '5 minutes'
+          AND o.attempt_count >= o.max_attempts
+        RETURNING o.id
+    ),
+    due AS (
         SELECT o.id
         FROM billing_email_outbox o
         WHERE o.attempt_count < o.max_attempts
