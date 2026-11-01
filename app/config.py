@@ -81,6 +81,12 @@ class Settings:
     tron_watcher_enabled: bool = _env_bool("TRON_WATCHER_ENABLED", False)
     tron_watch_interval_seconds: int = int(os.getenv("TRON_WATCH_INTERVAL_SECONDS", "60"))
     tron_watch_batch_size: int = int(os.getenv("TRON_WATCH_BATCH_SIZE", "20"))
+    tron_sweep_enabled: bool = _env_bool("TRON_SWEEP_ENABLED", False)
+    tron_sweep_signer_url: str | None = os.getenv("TRON_SWEEP_SIGNER_URL")
+    tron_sweep_signer_token: str | None = os.getenv("TRON_SWEEP_SIGNER_TOKEN")
+    tron_treasury_address: str | None = os.getenv("TRON_TREASURY_ADDRESS")
+    tron_sweep_threshold_minor: int = int(os.getenv("TRON_SWEEP_THRESHOLD_MINOR", "10000000"))
+    tron_sweep_max_fee_sun: int = int(os.getenv("TRON_SWEEP_MAX_FEE_SUN", "0"))
 
 
 settings = Settings()
