@@ -17,7 +17,7 @@ CREATE TABLE billing_automation_settings (
         CHECK (retry_interval_minutes BETWEEN 5 AND 1440),
     max_technical_retries INTEGER NOT NULL DEFAULT 3
         CHECK (max_technical_retries BETWEEN 1 AND 3),
-    notification_timezone_mode VARCHAR(12) NOT NULL DEFAULT 'TENANT'
+    notification_timezone_mode VARCHAR(12) NOT NULL DEFAULT 'PLATFORM'
         CHECK (notification_timezone_mode IN ('TENANT', 'PLATFORM')),
     platform_timezone VARCHAR(80) NOT NULL DEFAULT 'UTC',
     price_change_notice_hours INTEGER NOT NULL DEFAULT 24
