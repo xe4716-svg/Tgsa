@@ -335,6 +335,52 @@ AS $email$
               o.subject, o.body, o.attempt_count
 $email$;
 
+CREATE OR REPLACE FUNCTION list_billing_reminder_recipients(p_limit INTEGER DEFAULT 1000)
+RETURNS TABLE (
+    tenant_id UUID,
+    subscription_id UUID,
+    plan_code VARCHAR,
+    plan_name VARCHAR,
+    subscription_status VARCHAR,
+    expires_at TIMESTAMPTZ,
+    timezone VARCHAR,
+    user_id UUID,
+    email VARCHAR,
+    email_notifications_enabled BOOLEAN
+)
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $reminders$
+    SELECT
+        s.tenant_id, s.id, p.code, p.name, s.status, s.expires_at,
+        COALESCE(pref.timezone, ar.timezone, cfg.platform_timezone, 'UTC'),
+        u.id,
+        CASE WHEN u.email_verified_at IS NOT NULL THEN u.email ELSE NULL END,
+        COALESCE(pref.email_notifications_enabled, TRUE)
+    FROM tenant_subscriptions s
+    JOIN membership_plans p ON p.id = s.plan_id
+    JOIN tenant_memberships tm
+      ON tm.tenant_id = s.tenant_id AND tm.role IN ('OWNER', 'ADMIN')
+    JOIN users u ON u.id = tm.user_id AND u.status = 'ACTIVE'
+    LEFT JOIN tenant_billing_preferences pref ON pref.tenant_id = s.tenant_id
+    LEFT JOIN tenant_auto_renew_settings ar
+      ON ar.tenant_id = s.tenant_id AND ar.subscription_id = s.id
+    CROSS JOIN billing_automation_settings cfg
+    WHERE s.expires_at IS NOT NULL
+      AND s.status IN ('ACTIVE', 'TRIALING', 'PAST_DUE', 'EXPIRED')
+      AND (
+          s.expires_at <= NOW() + INTERVAL '31 days'
+          OR (s.status = 'EXPIRED' AND s.expiry_notified_at IS NULL)
+      )
+    ORDER BY s.expires_at
+    LIMIT LEAST(GREATEST(COALESCE(p_limit, 1000), 1), 5000)
+$reminders$;
+
+REVOKE ALL ON FUNCTION list_billing_reminder_recipients(INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION list_billing_reminder_recipients(INTEGER) TO tgs_runtime;
+
 REVOKE ALL ON FUNCTION create_due_auto_renew_intents(INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION create_due_auto_renew_intents(INTEGER) TO tgs_runtime;
 REVOKE ALL ON FUNCTION claim_due_auto_renew_intents(INTEGER) FROM PUBLIC;
