@@ -133,6 +133,9 @@ BEGIN
         updated_at = NOW();
 
     RETURN TRUE;
+EXCEPTION
+    WHEN unique_violation THEN
+        RETURN FALSE;
 END
 $link$;
 
