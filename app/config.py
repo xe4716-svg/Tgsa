@@ -43,6 +43,42 @@ class Settings:
         "PASSWORD_RESET_URL", "http://localhost:3000/reset-password"
     )
 
+    # Payment provider credentials are optional until a provider is enabled.
+    public_api_base_url: str = os.getenv("PUBLIC_API_BASE_URL", "http://localhost:8000")
+    payment_return_url: str = os.getenv("PAYMENT_RETURN_URL", "http://localhost:3000/wallet")
+    manual_payment_contact_url: str = os.getenv("MANUAL_PAYMENT_CONTACT_URL", "")
+
+    stripe_secret_key: str | None = os.getenv("STRIPE_SECRET_KEY")
+    stripe_webhook_secret: str | None = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+    alipay_app_id: str | None = os.getenv("ALIPAY_APP_ID")
+    alipay_private_key_pem: str | None = os.getenv("ALIPAY_PRIVATE_KEY_PEM")
+    alipay_public_key_pem: str | None = os.getenv("ALIPAY_PUBLIC_KEY_PEM")
+    alipay_gateway_url: str = os.getenv(
+        "ALIPAY_GATEWAY_URL", "https://openapi.alipay.com/gateway.do"
+    )
+
+    wechat_mchid: str | None = os.getenv("WECHAT_MCHID")
+    wechat_appid: str | None = os.getenv("WECHAT_APPID")
+    wechat_serial_no: str | None = os.getenv("WECHAT_SERIAL_NO")
+    wechat_private_key_pem: str | None = os.getenv("WECHAT_PRIVATE_KEY_PEM")
+    wechat_api_v3_key: str | None = os.getenv("WECHAT_API_V3_KEY")
+    wechat_platform_cert_pem: str | None = os.getenv("WECHAT_PLATFORM_CERT_PEM")
+    wechat_api_base_url: str = os.getenv(
+        "WECHAT_API_BASE_URL", "https://api.mch.weixin.qq.com"
+    )
+
+    easypay_gateway_url: str | None = os.getenv("EASYPAY_GATEWAY_URL")
+    easypay_pid: str | None = os.getenv("EASYPAY_PID")
+    easypay_key: str | None = os.getenv("EASYPAY_KEY")
+
+    tron_api_base_url: str = os.getenv("TRON_API_BASE_URL", "https://api.trongrid.io")
+    trongrid_api_key: str | None = os.getenv("TRONGRID_API_KEY")
+    tron_usdt_contract: str = os.getenv(
+        "TRON_USDT_CONTRACT", "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+    )
+    tron_account_xpub: str | None = os.getenv("TRON_ACCOUNT_XPUB")
+
 
 settings = Settings()
 
