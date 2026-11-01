@@ -304,7 +304,8 @@ AS $email$
     FROM due, users u
     WHERE o.id = due.id
       AND u.id = o.user_id
-    RETURNING o.id, o.tenant_id, o.user_id, u.email,
+    RETURNING o.id, o.tenant_id, o.user_id,
+              CASE WHEN u.email_verified_at IS NOT NULL THEN u.email ELSE NULL END,
               o.subject, o.body, o.attempt_count
 $email$;
 
