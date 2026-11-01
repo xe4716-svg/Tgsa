@@ -38,6 +38,12 @@ class AssignSubscriptionRequest(BaseModel):
     duration_days: int | None = Field(default=30, ge=1, le=3650)
 
 
+class TenantFeatureOverrideRequest(BaseModel):
+    enabled_override: bool | None = None
+    limit_delta: int = Field(default=0, ge=-1000000, le=1000000)
+    reason: str = Field(min_length=3, max_length=500)
+
+
 def _require_platform_admin(principal: AuthPrincipal) -> None:
     if not principal.platform_admin:
         raise HTTPException(status_code=403, detail="Platform administrator permission required")
@@ -269,3 +275,119 @@ async def assign_subscription(
         "plan_name": plan["name"],
         "expires_at": expires_at,
     }
+
+
+@router.put("/admin/tenants/{tenant_id}/feature-overrides/{feature_key}")
+async def put_tenant_feature_override(
+    tenant_id: UUID,
+    feature_key: str,
+    payload: TenantFeatureOverrideRequest,
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    """Set a tenant-specific feature or quota exception with an audit trail."""
+    _require_platform_admin(principal)
+    if feature_key not in FEATURE_KEYS:
+        raise HTTPException(status_code=422, detail="Unknown feature key")
+    if payload.limit_delta and not feature_key.startswith("max_"):
+        raise HTTPException(status_code=422, detail="Quota delta only applies to limit features")
+    if payload.enabled_override is None and payload.limit_delta == 0:
+        raise HTTPException(status_code=422, detail="Provide an override or nonzero limit delta")
+
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('app.tenant_id', $1, true)", str(tenant_id)
+            )
+            tenant = await conn.fetchrow(
+                "SELECT id FROM tenants WHERE id = $1 FOR UPDATE", tenant_id
+            )
+            if not tenant:
+                raise HTTPException(status_code=404, detail="Tenant not found")
+            previous = await conn.fetchrow(
+                """
+                SELECT enabled_override, limit_delta, reason
+                FROM tenant_feature_overrides
+                WHERE tenant_id = $1 AND feature_key = $2
+                """, tenant_id, feature_key
+            )
+            await conn.execute(
+                """
+                INSERT INTO tenant_feature_overrides
+                    (tenant_id, feature_key, enabled_override, limit_delta,
+                     reason, updated_by)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (tenant_id, feature_key) DO UPDATE
+                SET enabled_override = EXCLUDED.enabled_override,
+                    limit_delta = EXCLUDED.limit_delta,
+                    reason = EXCLUDED.reason,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
+                """,
+                tenant_id, feature_key, payload.enabled_override,
+                payload.limit_delta, payload.reason, principal.user_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO audit_logs
+                    (tenant_id, actor_user_id, action, resource_type, details)
+                VALUES ($1, $2, 'TENANT_FEATURE_OVERRIDE_SET',
+                        'tenant_feature_override', $3::jsonb)
+                """,
+                tenant_id, principal.user_id,
+                json.dumps({
+                    "feature_key": feature_key,
+                    "before": dict(previous) if previous else None,
+                    "after": {
+                        "enabled_override": payload.enabled_override,
+                        "limit_delta": payload.limit_delta,
+                        "reason": payload.reason,
+                    },
+                }),
+            )
+    return {"status": "updated", "feature_key": feature_key,
+            "enabled_override": payload.enabled_override,
+            "limit_delta": payload.limit_delta}
+
+
+@router.delete("/admin/tenants/{tenant_id}/feature-overrides/{feature_key}")
+async def delete_tenant_feature_override(
+    tenant_id: UUID,
+    feature_key: str,
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    """Remove a tenant exception, reverting to the plan default."""
+    _require_platform_admin(principal)
+    if feature_key not in FEATURE_KEYS:
+        raise HTTPException(status_code=422, detail="Unknown feature key")
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('app.tenant_id', $1, true)", str(tenant_id)
+            )
+            tenant = await conn.fetchrow(
+                "SELECT id FROM tenants WHERE id = $1 FOR UPDATE", tenant_id
+            )
+            if not tenant:
+                raise HTTPException(status_code=404, detail="Tenant not found")
+            previous = await conn.fetchrow(
+                """
+                DELETE FROM tenant_feature_overrides
+                WHERE tenant_id = $1 AND feature_key = $2
+                RETURNING enabled_override, limit_delta, reason
+                """, tenant_id, feature_key
+            )
+            if previous:
+                await conn.execute(
+                    """
+                    INSERT INTO audit_logs
+                        (tenant_id, actor_user_id, action, resource_type, details)
+                    VALUES ($1, $2, 'TENANT_FEATURE_OVERRIDE_CLEARED',
+                            'tenant_feature_override', $3::jsonb)
+                    """,
+                    tenant_id, principal.user_id,
+                    json.dumps({"feature_key": feature_key,
+                                "before": dict(previous)}),
+                )
+    return {"status": "cleared", "feature_key": feature_key}
