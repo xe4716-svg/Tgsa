@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from decimal import Decimal
+from datetime import datetime, timezone
 from urllib.parse import parse_qs
+
+import httpx
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -368,7 +370,7 @@ async def create_wallet_topup(
             channel,
             request,
         )
-    except (PaymentGatewayError, httpx_error_types()) as exc:
+    except (PaymentGatewayError, httpx.HTTPError) as exc:
         async with request.app.state.db_pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
@@ -412,10 +414,6 @@ async def create_wallet_topup(
         raise HTTPException(status_code=409, detail="Top-up order changed while payment was being prepared")
     return _topup_response(updated)
 
-
-def httpx_error_types():
-    import httpx
-    return (httpx.HTTPError,)
 
 
 @router.get("/billing/wallet/topups")
@@ -652,18 +650,20 @@ async def _process_verified_payment(
                     "order_no": order_no,
                 }),
             )
+            db_now = await conn.fetchval("SELECT NOW()")
             await conn.execute(
                 """
                 UPDATE wallet_topup_orders
                 SET status = 'PAID', provider_transaction_id = $3,
-                    paid_at = NOW(), updated_at = NOW(),
-                    metadata = metadata || $4::jsonb
+                    paid_at = $4, updated_at = $4,
+                    metadata = metadata || $5::jsonb
                 WHERE tenant_id = $1 AND id = $2
                 """,
                 tenant_id,
                 topup["id"],
                 details.get("provider_transaction_id"),
-                json.dumps({"paid_after_expiry": topup["expires_at"] < topup["created_at"]}),
+                db_now,
+                json.dumps({"paid_after_expiry": topup["expires_at"] < db_now}),
             )
             await conn.execute(
                 """
