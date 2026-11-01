@@ -211,6 +211,7 @@ GRANT SELECT, INSERT, UPDATE ON payment_provider_configs TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON wallet_topup_orders TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON payment_webhook_events TO tgs_runtime;
 GRANT USAGE, SELECT ON SEQUENCE tron_deposit_index_seq TO tgs_runtime;
+REVOKE ALL ON FUNCTION claim_pending_tron_deposits(INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION claim_pending_tron_deposits(INTEGER) TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON wallet_ledger_entries TO tgs_runtime;
 REVOKE UPDATE, DELETE ON wallet_ledger_entries FROM tgs_runtime;
