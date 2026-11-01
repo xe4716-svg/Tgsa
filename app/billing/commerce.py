@@ -24,6 +24,8 @@ class PurchaseQuoteRequest(BaseModel):
 
 class PurchaseRequest(PurchaseQuoteRequest):
     idempotency_key: str = Field(min_length=16, max_length=120)
+    expected_price_version: int | None = Field(default=None, ge=1)
+    expected_amount_minor: int | None = Field(default=None, ge=0)
 
 
 class PlanPriceRequest(BaseModel):
@@ -484,6 +486,49 @@ async def purchase_membership(
                 currency,
                 lock_current=True,
             )
+            if (
+                payload.expected_price_version is not None
+                and (
+                    payload.expected_price_version != quote["price_version"]
+                    or payload.expected_amount_minor != quote["list_amount_minor"]
+                )
+            ):
+                raise HTTPException(status_code=409, detail="AUTO_RENEW_PRICE_CHANGED")
+
+            if payload.idempotency_key.startswith("auto-renew:"):
+                current_subscription = quote["current_subscription"]
+                auto_renew = await conn.fetchrow(
+                    """
+                    SELECT enabled, subscription_id
+                    FROM tenant_auto_renew_settings
+                    WHERE tenant_id = $1
+                    FOR UPDATE
+                    """,
+                    principal.tenant_id,
+                )
+                if (
+                    not current_subscription
+                    or not auto_renew
+                    or not auto_renew["enabled"]
+                    or auto_renew["subscription_id"] != current_subscription["id"]
+                ):
+                    raise HTTPException(status_code=409, detail="AUTO_RENEW_DISABLED")
+                active_intent = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM subscription_renewal_intents
+                        WHERE tenant_id = $1
+                          AND idempotency_key = $2
+                          AND status = 'PROCESSING'
+                    )
+                    """,
+                    principal.tenant_id,
+                    payload.idempotency_key,
+                )
+                if not active_intent:
+                    raise HTTPException(status_code=409, detail="AUTO_RENEW_INTENT_NOT_ACTIVE")
+
             await conn.execute(
                 """
                 INSERT INTO tenant_wallet_accounts (tenant_id, currency)
@@ -673,6 +718,27 @@ async def purchase_membership(
                     quote["plan_id"],
                     effective_start,
                     effective_end,
+                )
+
+            if quote["order_kind"] != "RENEWAL":
+                await conn.execute(
+                    """
+                    UPDATE tenant_auto_renew_settings
+                    SET enabled = FALSE, updated_at = NOW()
+                    WHERE tenant_id = $1
+                    """,
+                    principal.tenant_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE subscription_renewal_intents
+                    SET status = 'CANCELED',
+                        last_error_code = 'SUBSCRIPTION_CHANGED',
+                        updated_at = NOW()
+                    WHERE tenant_id = $1
+                      AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                    """,
+                    principal.tenant_id,
                 )
 
             await conn.execute(
