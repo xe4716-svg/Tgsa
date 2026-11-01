@@ -42,6 +42,9 @@
 - POST /billing/wallet/topups：创建在线钱包充值订单。
 - GET /billing/wallet/topups：查看充值订单历史。
 - GET /billing/wallet/topups/{order_no}：查看单笔充值订单。
+- GET /billing/auto-renew、PUT /billing/auto-renew：查看/开启/关闭自动续费；开启时选择币种、周期和时区。
+- GET/PUT /billing/notification-preferences：设置通知时区与邮件通知。
+- GET /billing/notifications：查看站内通知；POST /billing/notifications/{notification_id}/read：标记已读。
 
 在线充值请求必须携带客户端生成的 idempotency_key（至少 16 个字符）。同一租户重复提交同一幂等键和相同请求，只返回原订单；同一幂等键对应不同金额、币种、渠道则拒绝。
 
@@ -62,6 +65,17 @@
 - 金额不符的链上转账进入 REVIEW，不自动入账，留待人工核实。
 - 订单过期后仍在有限观察窗口内扫描；实际到账晚于订单有效期但金额正确时会入账并记录 paid_after_expiry。
 
+### 自动续费与通知
+
+- 默认关闭；只有租户 OWNER/ADMIN 可以开启或关闭。仅支持有效的付费、有限期订阅，且续费币种必须与剩余已付款会员价值币种一致。
+- 默认在到期前 3 天创建续费意图，自动从钱包扣款；不直接从银行卡/第三方支付渠道扣款。
+- 余额不足进入 WAITING_FOR_BALANCE，不产生负余额；钱包充值或超管人工入账后会唤醒待处理意图。
+- 到期前仍未到账不会扣款；订阅过期后自动续费关闭，用户必须手动选择套餐。
+- 技术异常最多重试 3 次；余额不足不是技术重试。价格金额发生变化时，先发送站内/邮件通知并等待超管配置的通知时长，等待期内用户可关闭自动续费。
+- 默认到期提醒为 7/3/1/0 天，可由超管配置提醒节点；时区可使用租户明确设置的 IANA 时区或平台统一时区。
+- API 启动后由 PostgreSQL advisory lock 选出单一自动化 Worker 负责续费意图、到期状态、提醒和邮件 outbox；多 API 副本不会同时执行同一调度。
+- 站内通知与 SMTP 邮件已实现；Telegram Bot 通知尚未接入。
+
 ### 超级管理员侧
 
 - PUT /admin/plans/{plan_code}/prices/{currency}/{duration_days}：设置套餐价格版本。
@@ -70,6 +84,7 @@
 - PUT /admin/billing/payment-methods/{provider}：启用/停用渠道并设置金额范围、排序和展示说明。
 - GET /admin/billing/tron-sweeps：查看全平台 TRC20 归集任务及异常状态。
 - POST /admin/billing/tron-sweeps：对指定充值地址发起人工归集；先向独立签名器询价，检查余额、TRX 资源和最高费用，再记录管理员和原因。
+- GET/PUT /admin/billing/automation-settings：设置自动续费提前天数、技术重试间隔/次数、价格变更通知等待时长、提醒节点和平台/租户时区模式。
 
 支付渠道凭据只从部署环境变量/Secret Manager 读取，绝不通过管理 API 返回。新渠道默认关闭；即使后台打开，凭据不完整或生产回调 URL 非 HTTPS 时仍显示不可用。
 
@@ -101,16 +116,16 @@
 - 各商户真实账号/证书配置后的沙箱与生产小额联调；当前仓库没有真实商户密钥。
 - TRC20 自动归集：用户已确认的每地址达到 10 USDT 才归集，低于门槛留在原地址。归集必须接入独立签名器/HSM 或受控热钱包服务，不能把助记词/私钥放进普通 API 环境。
 - 充值退款、信用卡拒付、资金冻结与账务冲正。
-- 自动续费设置、余额不足提醒、待续费意图与扣款调度。
-- 到期任务暂停、续费后资源选择与 Worker 恢复。
+- Telegram Bot 到期/续费通知通道。
+- 到期后实际 Telegram 任务暂停、续费后资源选择与 Worker 安全恢复（当前仓库还没有完整任务执行 Worker）。
 - 前端钱包充值 UI、支付二维码渲染和订单状态轮询。
 
 在真实商户凭据、回调域名、商户沙箱/生产测试和资金对账完成前，不得对外宣称支付渠道已正式上线。自动提现也尚未实现。
 
 ## 6. 部署
 
-迁移顺序为 001 至 007。新 PostgreSQL 数据卷会由 Docker 初始化脚本按文件名顺序执行迁移。已有数据卷不会因为重新启动容器而自动执行新增迁移；部署前需备份数据库，并由数据库管理员在维护窗口依次执行尚未应用的迁移。
+迁移顺序为 001 至 008。新 PostgreSQL 数据卷会由 Docker 初始化脚本按文件名顺序执行迁移。已有数据卷不会因为重新启动容器而自动执行新增迁移；部署前需备份数据库，并由数据库管理员在维护窗口依次执行尚未应用的迁移。
 
 新增环境变量见 .env.example。生产必须设置 HTTPS 的 PUBLIC_API_BASE_URL 与 PAYMENT_RETURN_URL；支付私钥、API key 和平台证书放在 Secret Manager，不要提交到 GitHub。TRC20 需要设置 TRON_ACCOUNT_XPUB、TRONGRID_API_KEY，并在确认 watcher 可用后设置 TRON_WATCHER_ENABLED=true。TRON_ACCOUNT_XPUB 只能是 m/44'/195'/0' 或 m/44'/195'/0'/0 的扩展公钥，禁止填入 xprv、助记词或种子。
 
-GitHub Actions 在 PostgreSQL 16 中执行 001–007 全部迁移、账务单元测试、支付签名测试、TRON xpub 派生测试，并验证租户 RLS、支付订单解析函数和钱包流水不可修改。
+GitHub Actions 在 PostgreSQL 16 中执行 001–008 全部迁移、账务单元测试、支付签名测试、TRON xpub 派生测试和自动续费提醒测试，并验证租户 RLS、续费意图领取、提醒收件人查询、支付订单解析函数和钱包流水不可修改。
