@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -324,9 +325,7 @@ def _wechat_authorization(method: str, path: str, body: str) -> str:
     ):
         raise PaymentGatewayError("WeChat Pay merchant credentials are incomplete")
     timestamp = str(int(time.time()))
-    nonce = base64.urlsafe_b64encode(hashlib.sha256(
-        f"{time.time_ns()}:{path}".encode()
-    ).digest()[:18]).decode().rstrip("=")
+    nonce = secrets.token_urlsafe(24)[:32]
     message = f"{method}\n{path}\n{timestamp}\n{nonce}\n{body}\n".encode("utf-8")
     signature = _rsa2_sign(message, settings.wechat_private_key_pem)
     return (
