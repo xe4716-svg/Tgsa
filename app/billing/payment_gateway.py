@@ -312,13 +312,13 @@ def create_alipay_page_url(
         raise PaymentGatewayError("Alipay merchant credentials are not configured")
     biz_content = {
         "out_trade_no": order_no,
-        "product_code": "FAST_INSTANT_TRADE_PAY",
+        "product_code": "QUICK_WAP_WAY",
         "total_amount": _minor_decimal(amount_minor, currency),
         "subject": description[:128],
     }
     params = {
         "app_id": settings.alipay_app_id,
-        "method": "alipay.trade.page.pay",
+        "method": "alipay.trade.wap.pay",
         "format": "JSON",
         "charset": "utf-8",
         "sign_type": "RSA2",
