@@ -1190,19 +1190,30 @@ async def _send_due_billing_emails(pool, lock_conn) -> None:
             status = "FAILED"
             error_code = "RECIPIENT_EMAIL_UNVERIFIED"
         else:
-            try:
-                await send_billing_notification_email(
-                    email,
-                    row["subject"],
-                    row["body"],
-                    message_id=f"<billing-{row['id']}@tgmate.com>",
-                )
-                status = "SENT"
-                error_code = None
-            except Exception as exc:
-                logger.warning("Billing email delivery failed id=%s error=%s", row["id"], type(exc).__name__)
-                status = "FAILED" if int(row["attempt_count"]) >= 5 else "PENDING"
-                error_code = type(exc).__name__[:80]
+            async with pool.acquire() as preference_conn:
+                async with preference_conn.transaction():
+                    await preference_conn.execute(
+                        "SELECT set_config('app.tenant_id', $1, true)",
+                        str(tenant_id),
+                    )
+                    email_enabled = await _tenant_email_enabled(preference_conn, tenant_id)
+            if not email_enabled:
+                status = "FAILED"
+                error_code = "EMAIL_NOTIFICATIONS_DISABLED"
+            else:
+                try:
+                    await send_billing_notification_email(
+                        email,
+                        row["subject"],
+                        row["body"],
+                        message_id=f"<billing-{row['id']}@tgmate.com>",
+                    )
+                    status = "SENT"
+                    error_code = None
+                except Exception as exc:
+                    logger.warning("Billing email delivery failed id=%s error=%s", row["id"], type(exc).__name__)
+                    status = "FAILED" if int(row["attempt_count"]) >= 5 else "PENDING"
+                    error_code = type(exc).__name__[:80]
 
         async with pool.acquire() as conn:
             async with conn.transaction():
