@@ -27,7 +27,7 @@ class PurchaseRequest(PurchaseQuoteRequest):
 
 
 class PlanPriceRequest(BaseModel):
-    amount_minor: int = Field(ge=0)
+    amount_minor: int = Field(ge=0, le=9_000_000_000_000_000)
 
 
 class WalletCreditRequest(BaseModel):
@@ -236,10 +236,37 @@ def _order_response(row, balance_minor: int | None = None) -> dict[str, Any]:
 
 
 @router.get("/billing/prices")
-async def list_current_prices():
+async def list_current_prices(request: Request):
     # Price rows are global catalogue data; no tenant-specific fields are exposed.
     # The caller may browse prices before signing in.
-    return {"prices": []}
+    async with request.app.state.db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT p.code AS plan_code, p.name AS plan_name, p.level,
+                   pr.currency, pr.duration_days, pr.amount_minor,
+                   pr.version, pr.created_at
+            FROM membership_plan_prices pr
+            JOIN membership_plans p ON p.id = pr.plan_id
+            WHERE p.is_active = TRUE
+              AND pr.is_current = TRUE
+            ORDER BY p.level, pr.currency, pr.duration_days
+            """
+        )
+    return {
+        "prices": [
+            {
+                "plan_code": row["plan_code"],
+                "plan_name": row["plan_name"],
+                "level": row["level"],
+                "currency": row["currency"],
+                "duration_days": row["duration_days"],
+                "amount_minor": row["amount_minor"],
+                "version": row["version"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+    }
 
 
 @router.get("/billing/wallet")
