@@ -623,16 +623,25 @@ async def platform_telegram_webhook(request: Request):
         update = json.loads(raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Invalid Telegram update JSON") from exc
+    if not isinstance(update, dict):
+        raise HTTPException(status_code=400, detail="Invalid Telegram update object")
 
     message = update.get("message") or update.get("edited_message") or {}
+    if not isinstance(message, dict):
+        return {"ok": True}
     chat = message.get("chat") or {}
     sender = message.get("from") or {}
     text_value = message.get("text") or ""
-    if chat.get("type") != "private" or not sender.get("id"):
+    if not isinstance(chat, dict) or not isinstance(sender, dict) or not isinstance(text_value, str):
+        return {"ok": True}
+    if chat.get("type") != "private" or not sender.get("id") or not chat.get("id"):
         return {"ok": True}
 
-    telegram_user_id = int(sender["id"])
-    chat_id = int(chat["id"])
+    try:
+        telegram_user_id = int(sender["id"])
+        chat_id = int(chat["id"])
+    except (TypeError, ValueError):
+        return {"ok": True}
     parts = text_value.split(maxsplit=1)
     command = parts[0].split("@", 1)[0] if parts else ""
 
