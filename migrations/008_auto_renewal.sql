@@ -235,7 +235,7 @@ RETURNS TABLE (
     currency VARCHAR,
     amount_minor BIGINT,
     price_version INTEGER,
-    request_fingerprint CHAR,
+    request_fingerprint CHAR(64),
     attempt_count INTEGER,
     max_attempts INTEGER,
     status VARCHAR
@@ -301,8 +301,7 @@ AS $email$
     SET status = 'PROCESSING',
         attempt_count = o.attempt_count + 1,
         updated_at = NOW()
-    FROM due
-    JOIN users u ON TRUE
+    FROM due, users u
     WHERE o.id = due.id
       AND u.id = o.user_id
     RETURNING o.id, o.tenant_id, o.user_id, u.email,
