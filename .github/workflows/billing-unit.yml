@@ -5,6 +5,8 @@ on:
     paths:
       - 'app/billing/**'
       - 'tests/test_billing_entitlements.py'
+      - 'tests/test_billing_commerce.py'
+      - 'migrations/006_wallet_commerce.sql'
       - '.github/workflows/billing-unit.yml'
   pull_request:
     paths:
@@ -22,8 +24,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check pytest
+        run: python -m pip install --disable-pip-version-check pytest 'fastapi>=0.115,<1'
       - name: Compile billing sources
-        run: python -m compileall -q app/billing tests/test_billing_entitlements.py
+        run: python -m compileall -q app/billing tests/test_billing_entitlements.py tests/test_billing_commerce.py
       - name: Run billing unit tests
-        run: python -m pytest -q tests/test_billing_entitlements.py
+        run: python -m pytest -q tests/test_billing_entitlements.py tests/test_billing_commerce.py
