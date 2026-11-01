@@ -115,7 +115,9 @@ def test_alipay_rejects_wrong_app_id(monkeypatch):
 def test_wechat_signature_and_aes_gcm_decryption(monkeypatch):
     private_key, _, _ = _make_rsa_keypair()
     api_key = "12345678901234567890123456789012"
-    monkeypatch.setattr(gateway, "settings", SimpleNamespace(wechat_api_v3_key=api_key))
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(
+        wechat_api_v3_key=api_key, wechat_mchid="mch_123", wechat_appid="app_123"
+    ))
 
     subject = issuer = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, "CI WeChat Platform Test")
@@ -139,6 +141,8 @@ def test_wechat_signature_and_aes_gcm_decryption(monkeypatch):
         "out_trade_no": "wechat_order_123",
         "transaction_id": "wx_tx_123",
         "trade_state": "SUCCESS",
+        "mchid": "mch_123",
+        "appid": "app_123",
         "amount": {"total": 5000, "currency": "CNY"},
     }
     nonce = b"0123456789ab"
@@ -176,7 +180,9 @@ def test_wechat_signature_and_aes_gcm_decryption(monkeypatch):
 
 def test_easypay_md5_callback_signature(monkeypatch):
     key = "epay_test_key"
-    monkeypatch.setattr(gateway, "settings", SimpleNamespace(easypay_key=key))
+    monkeypatch.setattr(gateway, "settings", SimpleNamespace(
+        easypay_key=key, easypay_pid="10001"
+    ))
     params = {
         "pid": "10001",
         "out_trade_no": "epay_order_123",
