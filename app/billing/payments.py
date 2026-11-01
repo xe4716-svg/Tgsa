@@ -785,7 +785,7 @@ async def stripe_webhook(request: Request):
         details = stripe_payment_details(event)
         if details is None:
             return {"received": True, "ignored": True}
-        result = await _process_verified_payment(request, "STRIPE", details, raw)
+        result = await _process_verified_payment(request.app.state.db_pool, "STRIPE", details, raw)
     except PaymentVerificationError as exc:
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook") from exc
     return {"received": True, "result": result}
