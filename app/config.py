@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 
 
@@ -129,6 +130,12 @@ def validate_startup_settings() -> None:
             "Configure PLATFORM_TELEGRAM_BOT_TOKEN, PLATFORM_TELEGRAM_BOT_USERNAME and "
             "PLATFORM_TELEGRAM_WEBHOOK_SECRET together"
         )
+    if all(telegram_values):
+        bot_username = settings.platform_telegram_bot_username.lstrip("@")
+        if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", bot_username):
+            raise RuntimeError("PLATFORM_TELEGRAM_BOT_USERNAME must be a valid bot username")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", settings.platform_telegram_webhook_secret):
+            raise RuntimeError("PLATFORM_TELEGRAM_WEBHOOK_SECRET must be 32-256 safe characters")
 
     if settings.app_env.lower() == "production":
         if not (settings.smtp_starttls or settings.smtp_use_tls):
