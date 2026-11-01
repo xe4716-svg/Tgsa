@@ -260,7 +260,17 @@ async def update_auto_renew_settings(
                     detail="Currency and renewal duration are required when enabling auto-renewal",
                 )
             currency = _normalize_currency(payload.currency)
-            timezone_name = _validate_timezone(payload.timezone or "UTC")
+            saved_timezone = await conn.fetchval(
+                "SELECT timezone FROM tenant_billing_preferences WHERE tenant_id = $1",
+                principal.tenant_id,
+            )
+            timezone_value = payload.timezone or saved_timezone
+            if not timezone_value:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Choose a timezone in notification preferences before enabling auto-renewal",
+                )
+            timezone_name = _validate_timezone(timezone_value)
 
             current = await conn.fetchrow(
                 """
