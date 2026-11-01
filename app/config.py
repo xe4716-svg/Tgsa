@@ -43,6 +43,10 @@ class Settings:
         "PASSWORD_RESET_URL", "http://localhost:3000/reset-password"
     )
 
+    platform_telegram_bot_token: str | None = os.getenv("PLATFORM_TELEGRAM_BOT_TOKEN")
+    platform_telegram_bot_username: str | None = os.getenv("PLATFORM_TELEGRAM_BOT_USERNAME")
+    platform_telegram_webhook_secret: str | None = os.getenv("PLATFORM_TELEGRAM_WEBHOOK_SECRET")
+
     # Payment provider credentials are optional until a provider is enabled.
     public_api_base_url: str = os.getenv("PUBLIC_API_BASE_URL", "http://localhost:8000")
     payment_return_url: str = os.getenv("PAYMENT_RETURN_URL", "http://localhost:3000/wallet")
@@ -114,6 +118,17 @@ def validate_startup_settings() -> None:
 
     if not settings.smtp_host:
         raise RuntimeError("SMTP_HOST must be configured before starting the API")
+
+    telegram_values = (
+        settings.platform_telegram_bot_token,
+        settings.platform_telegram_bot_username,
+        settings.platform_telegram_webhook_secret,
+    )
+    if any(telegram_values) and not all(telegram_values):
+        raise RuntimeError(
+            "Configure PLATFORM_TELEGRAM_BOT_TOKEN, PLATFORM_TELEGRAM_BOT_USERNAME and "
+            "PLATFORM_TELEGRAM_WEBHOOK_SECRET together"
+        )
 
     if settings.app_env.lower() == "production":
         if not (settings.smtp_starttls or settings.smtp_use_tls):
