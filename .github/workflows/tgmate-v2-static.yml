@@ -24,7 +24,6 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install pglast==8.7
       - run: python -m compileall -q app scripts tests
-      - run: python validate_sql.py
       - name: Verify imported manifest
         run: |
           python - <<'PYCODE'
@@ -33,3 +32,4 @@ jobs:
           manifest=json.loads(Path('UPLOAD_MANIFEST.json').read_text())
           assert all(hashlib.sha256(Path(n).read_bytes()).hexdigest()==h for n,h in manifest.items())
           PYCODE
+      - run: python validate_sql.py
