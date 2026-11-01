@@ -73,7 +73,8 @@ def _normalize_currency(value: str) -> str:
 
 def _format_amount(currency: str, amount_minor: int) -> str:
     decimals = 6 if currency == "USDT" else 2
-    return f"{currency} {amount_minor / (10 ** decimals):,.{decimals}f}"
+    whole, fraction = divmod(int(amount_minor), 10 ** decimals)
+    return f"{currency} {whole:,}.{fraction:0{decimals}d}"
 
 
 def reminder_bucket(expires_at: datetime, now: datetime, reminder_days: list[int]) -> int | None:
