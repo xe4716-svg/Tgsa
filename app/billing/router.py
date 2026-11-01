@@ -342,7 +342,7 @@ async def assign_subscription(
                     last_error_code = 'MANUAL_SUBSCRIPTION_CHANGE',
                     updated_at = NOW()
                 WHERE tenant_id = $1
-                  AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY')
+                  AND status IN ('PENDING', 'PROCESSING', 'WAITING_FOR_BALANCE', 'RETRY', 'FAILED')
                 """,
                 tenant_id,
             )
