@@ -33,9 +33,11 @@ on:
       - 'migrations/006_wallet_commerce.sql'
       - 'migrations/007_payment_orchestration.sql'
       - 'migrations/008_auto_renewal.sql'
+      - 'migrations/009_telegram_notifications.sql'
       - 'app/billing/payment_gateway.py'
       - 'app/billing/payments.py'
       - 'app/main.py'
+      - 'app/auth/mailer.py'
       - '.github/workflows/billing-unit.yml'
 
 jobs:
