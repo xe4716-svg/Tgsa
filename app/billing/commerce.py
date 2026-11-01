@@ -1018,6 +1018,26 @@ async def credit_tenant_wallet(
                     "idempotency_key": payload.idempotency_key,
                 }),
             )
+            await conn.execute(
+                """
+                UPDATE subscription_renewal_intents i
+                SET status = 'PENDING', next_attempt_at = NOW(),
+                    last_error_code = NULL, updated_at = NOW()
+                FROM tenant_auto_renew_settings ar
+                JOIN tenant_subscriptions s
+                  ON s.tenant_id = ar.tenant_id AND s.id = ar.subscription_id
+                WHERE i.tenant_id = $1
+                  AND i.currency = $2
+                  AND i.status = 'WAITING_FOR_BALANCE'
+                  AND ar.tenant_id = i.tenant_id
+                  AND ar.subscription_id = i.subscription_id
+                  AND ar.enabled = TRUE
+                  AND s.status IN ('ACTIVE', 'TRIALING')
+                  AND s.expires_at > NOW()
+                """,
+                tenant_id,
+                currency,
+            )
     return {
         "status": "credited",
         "currency": currency,
