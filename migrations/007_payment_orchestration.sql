@@ -91,6 +91,75 @@ CREATE INDEX idx_wallet_topup_pending_expiry
     ON wallet_topup_orders(status, expires_at)
     WHERE status = 'PENDING';
 
+ALTER TABLE wallet_topup_orders
+    ADD COLUMN deposit_address VARCHAR(64),
+    ADD COLUMN derivation_index BIGINT,
+    ADD COLUMN last_scanned_at TIMESTAMPTZ;
+
+ALTER TABLE wallet_topup_orders
+    DROP CONSTRAINT IF EXISTS wallet_topup_orders_status_check;
+ALTER TABLE wallet_topup_orders
+    ADD CONSTRAINT wallet_topup_orders_status_check
+    CHECK (status IN ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'CANCELED', 'REVIEW'));
+
+CREATE UNIQUE INDEX uq_wallet_topup_deposit_address
+    ON wallet_topup_orders(deposit_address)
+    WHERE deposit_address IS NOT NULL;
+CREATE UNIQUE INDEX uq_wallet_topup_derivation_index
+    ON wallet_topup_orders(derivation_index)
+    WHERE derivation_index IS NOT NULL;
+CREATE INDEX idx_tron_deposits_due
+    ON wallet_topup_orders(status, last_scanned_at, created_at)
+    WHERE provider = 'USDT' AND deposit_address IS NOT NULL;
+
+CREATE SEQUENCE tron_deposit_index_seq
+    AS BIGINT MINVALUE 0 START WITH 0 INCREMENT BY 1 NO CYCLE;
+
+-- Atomically claim due TRC20 addresses. The function returns only the fields
+-- required by the chain watcher and never exposes user or wallet data.
+CREATE OR REPLACE FUNCTION claim_pending_tron_deposits(p_limit INTEGER DEFAULT 20)
+RETURNS TABLE (
+    id UUID,
+    tenant_id UUID,
+    order_no VARCHAR,
+    deposit_address VARCHAR,
+    amount_minor BIGINT,
+    status VARCHAR
+)
+LANGUAGE SQL
+VOLATILE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $
+    WITH due AS (
+        SELECT o.id
+        FROM wallet_topup_orders o
+        WHERE o.provider = 'USDT'
+          AND o.deposit_address IS NOT NULL
+          AND o.status IN ('PENDING', 'EXPIRED')
+          AND o.created_at > NOW() - INTERVAL '7 days'
+          AND (
+              o.last_scanned_at IS NULL
+              OR o.last_scanned_at < NOW() - INTERVAL '60 seconds'
+          )
+        ORDER BY o.last_scanned_at NULLS FIRST, o.created_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT LEAST(GREATEST(COALESCE(p_limit, 20), 1), 100)
+    )
+    UPDATE wallet_topup_orders o
+    SET status = CASE
+            WHEN o.status = 'PENDING' AND o.expires_at <= NOW()
+            THEN 'EXPIRED'
+            ELSE o.status
+        END,
+        last_scanned_at = NOW(),
+        updated_at = NOW()
+    FROM due
+    WHERE o.id = due.id
+    RETURNING o.id, o.tenant_id, o.order_no, o.deposit_address,
+              o.amount_minor, o.status
+$;
+
 CREATE TABLE payment_webhook_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     provider VARCHAR(16) NOT NULL
@@ -141,6 +210,8 @@ GRANT EXECUTE ON FUNCTION resolve_wallet_topup_order(TEXT) TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON payment_provider_configs TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON wallet_topup_orders TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON payment_webhook_events TO tgs_runtime;
+GRANT USAGE, SELECT ON SEQUENCE tron_deposit_index_seq TO tgs_runtime;
+GRANT EXECUTE ON FUNCTION claim_pending_tron_deposits(INTEGER) TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON wallet_ledger_entries TO tgs_runtime;
 REVOKE UPDATE, DELETE ON wallet_ledger_entries FROM tgs_runtime;
 
