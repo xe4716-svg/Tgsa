@@ -194,13 +194,76 @@ async def _submit_sweep_job(pool, client: httpx.AsyncClient, job) -> None:
         "amount_minor": int(job["amount_minor"]),
         "max_fee_sun": int(job["max_fee_sun"]),
     }
+    signer_headers = {"Authorization": f"Bearer {settings.tron_sweep_signer_token}"}
+    quote_url = settings.tron_sweep_signer_url.rstrip("/") + "/v1/tron/usdt/quote"
+    try:
+        quote_response = await client.post(
+            quote_url,
+            json={
+                "order_id": str(job["topup_order_id"]),
+                "derivation_index": int(job["derivation_index"]),
+                "from_address": job["source_address"],
+                "to_address": job["destination_address"],
+                "token_contract": job["token_contract"],
+            },
+            headers=signer_headers,
+        )
+        quote_response.raise_for_status()
+        quote = quote_response.json()
+        available_amount = int(quote["available_amount_minor"])
+        estimated_fee = int(quote["estimated_fee_sun"])
+        can_sweep = quote.get("can_sweep") is True
+    except (httpx.HTTPError, ValueError, TypeError, KeyError):
+        status = "REVIEW" if int(job["attempt_count"]) >= 3 else "RETRY"
+        await _update_sweep_job(
+            pool,
+            job["tenant_id"],
+            job["id"],
+            status=status,
+            error_code="SIGNER_QUOTE_FAILED",
+            delay_seconds=3600,
+        )
+        return
+
+    if available_amount < int(job["amount_minor"]):
+        await _update_sweep_job(
+            pool,
+            job["tenant_id"],
+            job["id"],
+            status="REVIEW",
+            error_code="SWEEP_BALANCE_BELOW_EXPECTED",
+        )
+        return
+    if estimated_fee < 0 or estimated_fee > int(job["max_fee_sun"]):
+        await _update_sweep_job(
+            pool,
+            job["tenant_id"],
+            job["id"],
+            status="REVIEW",
+            error_code="FEE_LIMIT_EXCEEDED",
+            fee_sun=estimated_fee,
+        )
+        return
+    if not can_sweep:
+        status = "REVIEW" if int(job["attempt_count"]) >= 3 else "RETRY"
+        await _update_sweep_job(
+            pool,
+            job["tenant_id"],
+            job["id"],
+            status=status,
+            error_code="INSUFFICIENT_TRX_OR_RESOURCES",
+            delay_seconds=3600,
+            fee_sun=estimated_fee,
+        )
+        return
+
     url = settings.tron_sweep_signer_url.rstrip("/") + "/v1/tron/usdt/sweep"
     try:
         response = await client.post(
             url,
             json=payload,
             headers={
-                "Authorization": f"Bearer {settings.tron_sweep_signer_token}",
+                **signer_headers,
                 "Idempotency-Key": str(job["id"]),
             },
         )
