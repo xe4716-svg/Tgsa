@@ -208,15 +208,6 @@ BEGIN
           AND s.expires_at IS NOT NULL
           AND s.expires_at > NOW()
           AND s.expires_at <= NOW() + make_interval(days => cfg.renewal_advance_days)
-          AND NOT EXISTS (
-              SELECT 1 FROM subscription_renewal_intents i
-              WHERE i.tenant_id = ar.tenant_id
-                AND i.subscription_id = s.id
-                AND i.renewal_cycle_key = (
-                    s.id::text || ':' ||
-                    to_char(s.expires_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISSUS')
-                )
-          )
         ORDER BY s.expires_at
         LIMIT LEAST(GREATEST(COALESCE(p_limit, 100), 1), 500)
     )
