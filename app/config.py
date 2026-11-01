@@ -78,6 +78,9 @@ class Settings:
         "TRON_USDT_CONTRACT", "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
     )
     tron_account_xpub: str | None = os.getenv("TRON_ACCOUNT_XPUB")
+    tron_watcher_enabled: bool = _env_bool("TRON_WATCHER_ENABLED", False)
+    tron_watch_interval_seconds: int = int(os.getenv("TRON_WATCH_INTERVAL_SECONDS", "60"))
+    tron_watch_batch_size: int = int(os.getenv("TRON_WATCH_BATCH_SIZE", "20"))
 
 
 settings = Settings()
