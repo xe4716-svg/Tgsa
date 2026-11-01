@@ -1294,6 +1294,8 @@ async def run_billing_automation(pool, stop_event: asyncio.Event) -> None:
                             await _send_due_billing_emails(pool, lock_conn)
                         except Exception:
                             logger.exception("Billing automation iteration failed")
+                            if lock_conn.is_closed():
+                                break
                         await _wait_or_stop(stop_event, 60)
                 finally:
                     try:
