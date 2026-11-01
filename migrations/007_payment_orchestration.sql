@@ -112,6 +112,123 @@ CREATE INDEX idx_tron_deposits_due
     ON wallet_topup_orders(status, last_scanned_at, created_at)
     WHERE provider = 'USDT' AND deposit_address IS NOT NULL;
 
+CREATE TABLE tron_sweep_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    topup_order_id UUID NOT NULL,
+    source_address VARCHAR(64) NOT NULL,
+    derivation_index BIGINT NOT NULL CHECK (derivation_index >= 0),
+    destination_address VARCHAR(64) NOT NULL,
+    token_contract VARCHAR(64) NOT NULL,
+    amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+    max_fee_sun BIGINT NOT NULL CHECK (max_fee_sun >= 0),
+    fee_sun BIGINT CHECK (fee_sun >= 0),
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN (
+            'PENDING', 'PROCESSING', 'RETRY', 'SUBMITTED',
+            'CONFIRMED', 'FAILED', 'REVIEW'
+        )),
+    txid VARCHAR(64),
+    signer_reference VARCHAR(160),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_checked_at TIMESTAMPTZ,
+    last_error_code VARCHAR(80),
+    requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    reason VARCHAR(500) NOT NULL DEFAULT 'Automatic TRC20 consolidation',
+    submitted_at TIMESTAMPTZ,
+    confirmed_at TIMESTAMPTZ,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, topup_order_id),
+    FOREIGN KEY (tenant_id, topup_order_id)
+        REFERENCES wallet_topup_orders(tenant_id, id)
+);
+CREATE UNIQUE INDEX uq_tron_sweep_txid
+    ON tron_sweep_jobs(txid)
+    WHERE txid IS NOT NULL;
+CREATE INDEX idx_tron_sweep_due
+    ON tron_sweep_jobs(status, next_attempt_at, created_at)
+    WHERE status IN ('PENDING', 'RETRY');
+CREATE INDEX idx_tron_sweep_confirmation
+    ON tron_sweep_jobs(status, last_checked_at)
+    WHERE status = 'SUBMITTED';
+
+ALTER TABLE tron_sweep_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tron_sweep_jobs FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_scope ON tron_sweep_jobs
+USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+
+CREATE OR REPLACE FUNCTION claim_pending_tron_sweeps(p_limit INTEGER DEFAULT 10)
+RETURNS TABLE (
+    id UUID,
+    tenant_id UUID,
+    topup_order_id UUID,
+    source_address VARCHAR,
+    derivation_index BIGINT,
+    destination_address VARCHAR,
+    token_contract VARCHAR,
+    amount_minor BIGINT,
+    max_fee_sun BIGINT,
+    attempt_count INTEGER
+)
+LANGUAGE SQL
+VOLATILE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $sweep$
+    WITH due AS (
+        SELECT j.id
+        FROM tron_sweep_jobs j
+        WHERE j.status IN ('PENDING', 'RETRY')
+          AND j.next_attempt_at <= NOW()
+        ORDER BY j.next_attempt_at, j.created_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT LEAST(GREATEST(COALESCE(p_limit, 10), 1), 100)
+    )
+    UPDATE tron_sweep_jobs j
+    SET status = 'PROCESSING',
+        attempt_count = j.attempt_count + 1,
+        updated_at = NOW()
+    FROM due
+    WHERE j.id = due.id
+    RETURNING j.id, j.tenant_id, j.topup_order_id, j.source_address,
+              j.derivation_index, j.destination_address, j.token_contract,
+              j.amount_minor, j.max_fee_sun, j.attempt_count
+$sweep$;
+
+CREATE OR REPLACE FUNCTION claim_submitted_tron_sweeps(p_limit INTEGER DEFAULT 20)
+RETURNS TABLE (
+    id UUID,
+    tenant_id UUID,
+    txid VARCHAR
+)
+LANGUAGE SQL
+VOLATILE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $confirm$
+    WITH due AS (
+        SELECT j.id
+        FROM tron_sweep_jobs j
+        WHERE j.status = 'SUBMITTED'
+          AND (
+              j.last_checked_at IS NULL
+              OR j.last_checked_at < NOW() - INTERVAL '60 seconds'
+          )
+        ORDER BY j.last_checked_at NULLS FIRST, j.submitted_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT LEAST(GREATEST(COALESCE(p_limit, 20), 1), 100)
+    )
+    UPDATE tron_sweep_jobs j
+    SET last_checked_at = NOW(), updated_at = NOW()
+    FROM due
+    WHERE j.id = due.id
+    RETURNING j.id, j.tenant_id, j.txid
+$confirm$;
+
 CREATE SEQUENCE tron_deposit_index_seq
     AS BIGINT MINVALUE 0 START WITH 0 INCREMENT BY 1 NO CYCLE;
 
@@ -209,10 +326,15 @@ GRANT EXECUTE ON FUNCTION resolve_wallet_topup_order(TEXT) TO tgs_runtime;
 
 GRANT SELECT, INSERT, UPDATE ON payment_provider_configs TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON wallet_topup_orders TO tgs_runtime;
+GRANT SELECT, INSERT, UPDATE ON tron_sweep_jobs TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON payment_webhook_events TO tgs_runtime;
 GRANT USAGE, SELECT ON SEQUENCE tron_deposit_index_seq TO tgs_runtime;
 REVOKE ALL ON FUNCTION claim_pending_tron_deposits(INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION claim_pending_tron_deposits(INTEGER) TO tgs_runtime;
+REVOKE ALL ON FUNCTION claim_pending_tron_sweeps(INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION claim_pending_tron_sweeps(INTEGER) TO tgs_runtime;
+REVOKE ALL ON FUNCTION claim_submitted_tron_sweeps(INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION claim_submitted_tron_sweeps(INTEGER) TO tgs_runtime;
 GRANT SELECT, INSERT, UPDATE ON wallet_ledger_entries TO tgs_runtime;
 REVOKE UPDATE, DELETE ON wallet_ledger_entries FROM tgs_runtime;
 
