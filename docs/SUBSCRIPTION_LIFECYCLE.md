@@ -73,11 +73,23 @@
 - 额度下降时，现有账号/任务数据不删除。后续 Worker 整合时暂停超额**运行**资源；新建资源严格按新限额拒绝。
 - 重要：迁移`005_entitlement_overrides.sql`部署完成前不得运行新服务代码；现有数据库必须通过受控迁移执行，`docker-compose`不会对已初始化数据库卷自动补迁移。
 
-## 7. 后续数据库/接口合同（尚待实现）
+## 7. 已实现的交易基础与后续接口
 
-推荐后续迁移定义：`membership_plan_prices`、`subscription_terms`、`billing_orders`、`tenant_wallet_balances`、`wallet_ledger_entries`、`auto_renewal_settings`、`billing_idempotency_keys`、`task_pause_reasons`、`resource_reactivation_selections`。钱款以不可变流水为准，余额只是派生/缓存；同租户订阅购买串行化锁定；所有涉及支付的状态更新与账本写入在同一个数据库事务。
+**迁移 006 与当前 API 已进入代码仓库：**
 
-后续用户接口：`POST /billing/purchases/quote`、`POST /billing/purchases`、`POST /billing/upgrades/quote`、`POST /billing/upgrades`、`PUT /billing/auto-renew`、`GET /billing/orders`、`POST /billing/reactivation-selection`。写接口要求幂等键；客服/超管手动加权益应进入专门人工操作流水，不伪造第三方订单。
+- 数据表：membership_plan_prices、tenant_wallet_accounts、wallet_ledger_entries、billing_orders、subscription_terms、platform_audit_logs。
+- 套餐价格版本：超管设置价格时保留旧版本；订单保存套餐名称、价格版本、币种、原价、升级抵扣、实付金额快照。
+- 钱包：每租户/每币种独立余额；CNY/USD 以分/美分计，USDT 以 0.000001 USDT 计；不同币种不混用。
+- 钱包流水：只允许 SELECT/INSERT，禁止运行角色 UPDATE/DELETE；余额与流水在同一事务提交。
+- 用户 API：GET /billing/prices、GET /billing/wallet、GET /billing/wallet/ledger、GET /billing/orders、POST /billing/purchases/quote、POST /billing/purchases。
+- 超管 API：PUT /admin/plans/{plan_code}/prices/{currency}/{duration_days}、POST /admin/tenants/{tenant_id}/wallet/credits。
+- 购买、续费、升级使用租户行锁和幂等键；余额不足时整笔事务回滚。
+- 人工充值：管理员核实顾客付款后可直接加钱包余额，不要求顾客先建充值订单或上传截图。
+- 手动会员分配修正：同套餐分配会顺延原到期时间；不会因默认 30 天而缩短无限期订阅。
+
+**仍待实现：** 第三方支付下单和回调验签、人工支付前台引导、退款/拒付/冲正、自动续费调度、到期任务暂停、续费后的资源选择与 Worker 恢复。当前没有预置套餐价格，超管必须先配置价格才能购买。
+
+部署注意：新数据库初始化会按文件名执行 001 至 006；已有数据卷不会自动执行新增迁移。先备份，再由数据库管理员执行 migrations/006_wallet_commerce.sql，最后部署包含钱包 API 的应用版本。详细接口和金额单位见 docs/WALLET_AND_PURCHASES.md。
 
 ## 8. 核心验收场景
 
