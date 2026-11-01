@@ -1,0 +1,89 @@
+name: Expand TG SaaS foundation source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tg_saas_v1_foundation_github_upload.zip"
+      - ".github/workflows/expand-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Safely expand source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+
+          archive = Path("tg_saas_v1_foundation_github_upload.zip")
+          if not archive.is_file():
+              raise SystemExit("Source ZIP was not found in the repository root.")
+
+          prefix = "tg_saas_v1_foundation/"
+          written = []
+          with ZipFile(archive) as zf:
+              for info in zf.infolist():
+                  if info.is_dir():
+                      continue
+                  name = PurePosixPath(info.filename)
+                  if name.is_absolute() or ".." in name.parts:
+                      raise SystemExit(f"Unsafe archive path: {info.filename}")
+                  if not info.filename.startswith(prefix):
+                      raise SystemExit(f"Unexpected archive root: {info.filename}")
+                  relative = PurePosixPath(*name.parts[1:])
+                  if not relative.parts:
+                      continue
+                  if relative.name == ".env":
+                      raise SystemExit("Refusing to publish a real .env file.")
+                  target = Path(".").joinpath(*relative.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(zf.read(info))
+                  written.append(relative.as_posix())
+
+          if not written:
+              raise SystemExit("No source files were extracted.")
+          print(f"Extracted {len(written)} source files:")
+          print("\n".join(sorted(written)))
+          PY
+
+      - name: Normalize repository files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f tg_saas_v1_foundation.gitignore
+          rm -f .github/workflows/expand-source.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          test -f .gitignore
+          test -d app
+          test -d docs
+          test -d migrations
+          test -d scripts
+          test -d tests
+
+      - name: Commit expanded source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: expand TG SaaS V1.0 foundation source"
+          git push origin HEAD:main
