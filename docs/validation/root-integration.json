@@ -1,0 +1,18 @@
+{
+  "database": "tgs_migration_11059c074e6c",
+  "production": false,
+  "fresh_database": true,
+  "exit_code": 0,
+  "tests": 82,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "credentials_absent": true,
+  "runtime_password_restored": true,
+  "junit_sha256": "0006dc99157da13bbd0714150fa6be0a5b86db7f1f80eb881d2f3b9fde282ee1",
+  "command": "python -m pytest tests -q --junitxml=docs/validation/root-integration.xml",
+  "integration_flags": [
+    "TGMATE_MIGRATION_INTEGRATION=1",
+    "TGMATE_RESOURCE_INTEGRATION=1"
+  ]
+}
