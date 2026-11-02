@@ -33,6 +33,7 @@ jobs:
       APP_DB_PASSWORD: ephemeral-runtime-test-only
       TGMATE_MIGRATION_INTEGRATION: '1'
       TGMATE_RESOURCE_INTEGRATION: '1'
+      TGMATE_IDENTITY_INTEGRATION: '1'
     steps:
       - uses: actions/checkout@v7
         with:

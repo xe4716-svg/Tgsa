@@ -10,8 +10,9 @@ from scripts.migrate import build_script, migration_body
 def test_released_files_have_single_atomic_wrapper():
     root = Path(__file__).resolve().parents[1]
     script = build_script(root / 'migrations')
-    assert script.count('\nBEGIN;\n') == 9
-    assert script.count('\nCOMMIT;\n') == 9
+    expected_count = len(list((root / 'migrations').glob('*.sql')))
+    assert script.count('\nBEGIN;\n') == expected_count
+    assert script.count('\nCOMMIT;\n') == expected_count
     assert script.index('pg_advisory_lock') < script.index('CREATE TABLE')
     assert 'Migration hash drift' in script
     assert '\\getenv app_db_password APP_DB_PASSWORD' in script
@@ -62,13 +63,13 @@ def test_database_migration_lifecycle(tmp_path):
         'Integration test requires a fresh disposable database'
     assert migrate(source) == 0, 'Initial migration failed'
     assert migrate(source) == 0, 'Idempotent migration failed'
-    assert query('SELECT count(*) FROM public.schema_migrations') == '9'
+    assert query('SELECT count(*) FROM public.schema_migrations') == str(len(list(source.glob('*.sql'))))
     for path in source.glob('*.sql'):
         shutil.copy2(path, tmp_path / path.name)
     first = tmp_path / '001_core.sql'
     original = first.read_bytes()
     first.write_bytes(original + b'\n-- hash drift probe\n')
-    probe = tmp_path / '010_probe.sql'
+    probe = tmp_path / '999_probe.sql'
     probe.write_text('CREATE TABLE public.migration_preflight_probe(id int);', encoding='utf-8')
     assert migrate(tmp_path) != 0, 'Hash drift was accepted'
     assert query("SELECT to_regclass('public.migration_preflight_probe') IS NULL") == 't'
@@ -79,4 +80,4 @@ def test_database_migration_lifecycle(tmp_path):
     probe.write_text('CREATE TABLE public.migration_rollback_probe(id int); SELECT 1/0;', encoding='utf-8')
     assert migrate(tmp_path) != 0, 'Invalid migration unexpectedly succeeded'
     assert query("SELECT to_regclass('public.migration_rollback_probe') IS NULL") == 't'
-    assert query("SELECT count(*) FROM public.schema_migrations WHERE name='010_probe.sql'") == '0'
+    assert query("SELECT count(*) FROM public.schema_migrations WHERE name='999_probe.sql'") == '0'
