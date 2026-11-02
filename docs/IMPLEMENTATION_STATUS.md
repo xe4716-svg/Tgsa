@@ -14,6 +14,7 @@ V1.2 context recovered from the existing “整合规划进度” chat: modular 
 - Explicit root/V2 identity mappings, current-session and permission checks, and offline linking/column-grant tools; verified against both schemas in one database.
 - Root-authenticated relay metadata API, separate tracked business migrations, and ordered combined initialization for Compose.
 - Version-checked relay conversation state controls with same-transaction audits and successful-request idempotency; no Telegram send is triggered.
+- Separate root-authenticated Bot broadcast, account broadcast and moderation metadata inventories, with independent channel read permissions.
 
 The new read routes are /api/v1/telegram/accounts and /api/v1/proxies. They expose fixed metadata columns, never encrypted sessions or proxy credentials. They do not authorize account login, proxy changes, or message sending.
 

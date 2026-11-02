@@ -11,6 +11,7 @@ def commands(psql='psql', enable_relay_control=False):
         [sys.executable, str(base/'migrate_business.py'), '--psql', psql],
         [sys.executable, str(base/'link_identity.py'), '--psql', psql, '--configure-runtime-read'],
         [sys.executable, str(base/'configure_business_reads.py'), '--psql', psql],
+        [sys.executable, str(base/'configure_catalog_reads.py'), '--psql', psql],
     ]
     if enable_relay_control:
         plan.append([sys.executable,str(base/'configure_relay_control.py'),'--psql',psql])
