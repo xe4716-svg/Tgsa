@@ -431,8 +431,8 @@ async def run_tron_watcher(pool, stop_event: asyncio.Event) -> None:
     """Run one database-leased confirmed-transfer watcher across API replicas."""
     if not settings.tron_watcher_enabled:
         return
-    if not settings.tron_account_xpub or not settings.trongrid_api_key:
-        logger.error("TRC20 watcher is enabled but the xpub or TronGrid API key is missing")
+    if not settings.tron_account_xpub:
+        logger.error("TRC20 watcher is enabled but the account xpub is missing")
         return
 
     interval = min(max(settings.tron_watch_interval_seconds, 30), 600)

@@ -2,7 +2,7 @@ name: Root integration checks
 
 on:
   pull_request:
-    paths: ['app/**', 'tests/**', 'scripts/migrate.py', 'migrations/**', 'requirements.txt', '.github/workflows/root-integration.yml']
+    paths: ['app/**', 'tests/**', 'scripts/**', 'migrations/**', 'requirements.txt', 'Dockerfile', 'docker-compose.yml', '.github/workflows/root-integration.yml']
   workflow_dispatch:
 
 permissions:
@@ -46,3 +46,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Root tests and fresh database migration lifecycle
         run: python -m pytest tests -q --junitxml=root-test-results.xml
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build API and worker image
+        run: docker build --tag tgmate-ci .
+      - name: Verify both process entrypoints exist
+        run: docker run --rm tgmate-ci python -c "import app.main; import app.workers.billing"

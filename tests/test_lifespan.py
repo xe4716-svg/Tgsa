@@ -13,7 +13,7 @@ def configure(monkeypatch, *, enabled=True, redis_error=False, worker_error=Fals
     if close_error:
         redis.aclose.side_effect = RuntimeError('redis close failed')
     monkeypatch.setattr(main, 'validate_startup_settings', lambda: None)
-    monkeypatch.setattr(main, 'settings', SimpleNamespace(database_url='unused', redis_url='unused', tron_watcher_enabled=enabled))
+    monkeypatch.setattr(main, 'settings', SimpleNamespace(database_url='unused', redis_url='unused', tron_watcher_enabled=enabled, run_background_workers=True))
     monkeypatch.setattr(main.asyncpg, 'create_pool', AsyncMock(return_value=db))
     def make_redis(*args, **kwargs):
         if redis_error:
@@ -107,3 +107,21 @@ def test_validation_failure_does_not_open_resources(monkeypatch):
         asyncio.run(run())
     main.asyncpg.create_pool.assert_not_awaited()
     redis.aclose.assert_not_awaited()
+
+
+def test_api_default_mode_does_not_start_workers(monkeypatch):
+    app, db, redis = configure(monkeypatch)
+    main.settings.run_background_workers = False
+    billing = AsyncMock()
+    tron = AsyncMock()
+    monkeypatch.setattr(main, 'run_billing_automation', billing)
+    monkeypatch.setattr(main, 'run_tron_watcher', tron)
+    async def run():
+        async with main.lifespan(app):
+            assert app.state.billing_automation_task is None
+            assert app.state.tron_watcher_task is None
+    asyncio.run(run())
+    billing.assert_not_called()
+    tron.assert_not_called()
+    db.close.assert_awaited_once()
+    redis.aclose.assert_awaited_once()

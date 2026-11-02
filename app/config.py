@@ -12,6 +12,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
+    run_background_workers: bool = _env_bool('RUN_BACKGROUND_WORKERS', False)
     app_name: str = os.getenv("APP_NAME", "TG SaaS API")
     app_env: str = os.getenv("APP_ENV", "development")
     database_url: str = os.getenv(

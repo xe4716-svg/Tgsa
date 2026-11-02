@@ -9,6 +9,8 @@ V1.2 context recovered from the existing “整合规划进度” chat: modular 
 - Resource cleanup on partial startup and worker failure.
 - Authenticated tenant-scoped account/proxy read APIs with cursor pagination and v1 response envelopes.
 - Root integration workflow with disposable PostgreSQL, plus local real-database evidence.
+- Separate commercial worker entrypoint and Compose service; API background work now defaults off.
+- Refuse-overwrite backups and restore-to-new-database tooling, with an actual restore and RLS rehearsal.
 
 The new read routes are /api/v1/telegram/accounts and /api/v1/proxies. They expose fixed metadata columns, never encrypted sessions or proxy credentials. They do not authorize account login, proxy changes, or message sending.
 
@@ -25,7 +27,7 @@ The new read routes are /api/v1/telegram/accounts and /api/v1/proxies. They expo
 | Commercial features | Existing membership/payment/wallet/notification implementations must be retained; dual-channel entitlements, quota audit, commission and sandbox reconciliation remain. |
 | Customer/admin frontend | Full responsive console, admin RBAC, tutorial center and browser acceptance remain. |
 | Long-term modules | CRM, analytics, asset library, diagnostics, teams, API/webhooks, workflows, AI operations/customer service/knowledge base and advanced commercial operations remain in scope. |
-| Operations | API/Bot/MTProto process separation, retention cleanup, backup/restore, monitoring, deployment rehearsal and fault testing remain. |
+| Operations | API/commercial worker separation and root-database restore rehearsal delivered. Full Bot/MTProto runtime separation, retention cleanup, key recovery, monitoring and target-environment deployment/fault testing remain. |
 | External acceptance | Real Telegram authorization, payment sandbox, HTTPS/staging and production credential rotation are unverified. |
 
 No main merge, deployment or final acceptance is claimed. Tests involving simulated external services are distinct from actual PostgreSQL migration/RLS checks.
