@@ -37,6 +37,7 @@ jobs:
       TGMATE_BUSINESS_READS_INTEGRATION: '1'
       TGMATE_BUSINESS_MIGRATION_INTEGRATION: '1'
       TGMATE_RELAY_CONTROL_INTEGRATION: '1'
+      TGMATE_CATALOG_INTEGRATION: '1'
     steps:
       - uses: actions/checkout@v7
         with:

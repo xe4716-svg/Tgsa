@@ -5,7 +5,7 @@ from scripts import bootstrap_combined as module
 def test_order_and_argument_boundaries():
     plan = module.commands('tool with spaces')
     assert [Path(command[1]).name for command in plan] == [
-        'migrate.py', 'migrate_business.py', 'link_identity.py', 'configure_business_reads.py']
+        'migrate.py', 'migrate_business.py', 'link_identity.py', 'configure_business_reads.py','configure_catalog_reads.py']
     assert all(command[command.index('--psql')+1] == 'tool with spaces' for command in plan)
 
 def test_failure_stops_before_grants(monkeypatch, capsys):
@@ -25,7 +25,7 @@ def test_all_stages_run_without_echoing_output(monkeypatch, capsys):
         return SimpleNamespace(returncode=0, stdout=b'private', stderr=b'private')
     monkeypatch.setattr(module.subprocess, 'run', run)
     assert module.main([]) == 0
-    assert len(calls)==4 and 'private' not in capsys.readouterr().out
+    assert len(calls)==5 and 'private' not in capsys.readouterr().out
 
 def test_missing_tool_is_safe(monkeypatch, capsys):
     def fail(*args, **kwargs):
@@ -37,4 +37,4 @@ def test_missing_tool_is_safe(monkeypatch, capsys):
 def test_control_privileges_require_explicit_bootstrap_option():
     assert all('configure_relay_control.py' not in command[1] for command in module.commands())
     plan=module.commands(enable_relay_control=True)
-    assert len(plan)==5 and Path(plan[-1][1]).name=='configure_relay_control.py'
+    assert len(plan)==6 and Path(plan[-1][1]).name=='configure_relay_control.py'
