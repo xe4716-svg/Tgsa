@@ -1,0 +1,48 @@
+name: Root integration checks
+
+on:
+  pull_request:
+    paths: ['app/**', 'tests/**', 'scripts/migrate.py', 'migrations/**', 'requirements.txt', '.github/workflows/root-integration.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: integration-test-only
+          POSTGRES_DB: tgmate_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: integration-test-only
+      PGDATABASE: tgmate_ci
+      APP_DB_PASSWORD: ephemeral-runtime-test-only
+      TGMATE_MIGRATION_INTEGRATION: '1'
+      TGMATE_RESOURCE_INTEGRATION: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install 'psycopg[binary]>=3.2,<4'
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Root tests and fresh database migration lifecycle
+        run: python -m pytest tests -q --junitxml=root-test-results.xml
