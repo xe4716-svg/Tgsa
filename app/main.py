@@ -15,6 +15,7 @@ from app.config import settings, validate_startup_settings
 from app.health import router as health_router
 from app.telegram.router import router as telegram_resources_router
 from app.integration.router import router as business_reads_router
+from app.integration.relay_control import router as relay_control_router
 
 
 async def _stop_workers(app):
@@ -69,6 +70,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(telegram_resources_router)
 app.include_router(business_reads_router)
+app.include_router(relay_control_router)
 app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(commerce_router)
