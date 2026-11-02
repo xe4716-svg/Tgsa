@@ -1,0 +1,13 @@
+{
+  "tests": 207,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "production": false,
+  "database": "tgs_legacy_copy_eb539a3340",
+  "exit_code": 0,
+  "original_database_modified": false,
+  "credentials_absent": true,
+  "junit_sha256": "b0ebed5e534c7880ed2b45b66048d812cbb3b640ea29a225e1acb26d91a34db2",
+  "junit_location": "private local evidence; excluded from source"
+}

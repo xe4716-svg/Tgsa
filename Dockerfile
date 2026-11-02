@@ -9,5 +9,6 @@ COPY scripts ./scripts
 COPY migrations ./migrations
 COPY workstreams/tgmate-v2/source_001_003 ./workstreams/tgmate-v2/source_001_003
 COPY workstreams/tgmate-v2/*.sql ./workstreams/tgmate-v2/
+COPY workstreams/tgmate-v2/UPLOAD_MANIFEST.json ./workstreams/tgmate-v2/
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

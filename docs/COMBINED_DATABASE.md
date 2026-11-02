@@ -16,6 +16,8 @@ The two streams have separate ledgers (`public.schema_migrations` and `public.bu
 
 An existing tgmate schema without a tracked business ledger is refused, including an empty ledger alongside that schema. There is no automatic adoption of a historical database. Back up and review its schema/data before designing an explicit adoption procedure. Do not fabricate ledger rows to bypass this check.
 
+The explicit inspection/adoption procedure and narrowly recognized historical reconciliation are documented in LEGACY_SCHEMA_ADOPTION.md. They remain separate from normal startup and never auto-run against a historical volume.
+
 Root-only deployments remain supported; the business runner requires root identity migration 010. These commands do not migrate identities by email, enable a second login service, grant business write privileges, or start Telegram workers. Session/Vault keys remain separate from database initialization.
 
 Tests cover script composition, release order, isolated ledgers, missing source rejection and sanitized failures. Set `TGMATE_BUSINESS_MIGRATION_INTEGRATION=1` with private owner PG* and optional PG_PSQL to run the disposable-child-database test. This requires a dedicated test cluster. Local actual PostgreSQL validation completed with 5 tests passing in 24.56s: first/repeat execution, all 12 original SQL hashes, separate root ledger count 10, hash drift and untracked/missing-root refusal, failed-file rollback and successful resume. Evidence is in docs/validation/business-migrations.json. This is database validation, not Telegram, payment or production deployment acceptance.
