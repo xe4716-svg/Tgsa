@@ -33,3 +33,8 @@ def test_missing_tool_is_safe(monkeypatch, capsys):
     monkeypatch.setattr(module.subprocess, 'run', fail)
     assert module.main([]) == 1
     assert 'private' not in capsys.readouterr().err
+
+def test_control_privileges_require_explicit_bootstrap_option():
+    assert all('configure_relay_control.py' not in command[1] for command in module.commands())
+    plan=module.commands(enable_relay_control=True)
+    assert len(plan)==5 and Path(plan[-1][1]).name=='configure_relay_control.py'

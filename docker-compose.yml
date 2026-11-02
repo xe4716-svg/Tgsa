@@ -15,7 +15,7 @@ services:
 
   migrate:
     build: .
-    command: ["python", "scripts/bootstrap_combined.py"]
+    command: ["python", "scripts/bootstrap_combined.py", "--enable-relay-control"]
     environment:
       PGHOST: db
       PGPORT: "5432"
