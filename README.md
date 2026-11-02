@@ -1,5 +1,11 @@
 # TG SaaS V1.0 — 持续迭代工程
 
+最新工程验收记录见 [实施状态](docs/IMPLEMENTATION_STATUS.md)。本轮新增可重入迁移、账号/代理只读接口、独立商业工作器及备份恢复工具；完整产品仍未验收。
+
+API 默认不启动商业后台任务。Compose 已包含 `billing` 服务；手动启动时还需运行 `python -m app.workers.billing`。旧单进程部署可临时显式设置 `RUN_BACKGROUND_WORKERS=true`，详见 [工作器进程](docs/WORKER_PROCESSES.md)。
+
+新库迁移入口为 `python scripts/migrate.py`，凭据通过私有 PG* 环境提供。已有未登记迁移账本的数据库不能直接自动接管，原 Docker 初始化与迁移账本需先核对，见 [迁移验证](docs/validation/migration-runtime.md)。恢复工具只恢复到新库，见 [恢复说明](docs/DATABASE_RECOVERY.md)。
+
 当前工程包含：
 - FastAPI、PostgreSQL、Redis、租户 RLS。
 - Telegram 登录服务层、Session 加密、多账号协议号文件。

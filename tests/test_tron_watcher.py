@@ -57,3 +57,31 @@ def test_tron_derivation_rejects_negative_index():
     )
     with pytest.raises(ValueError):
         derive_tron_deposit_address(account.PublicKey().ToExtended(), -1)
+
+
+def test_watcher_without_provider_key_starts_and_stops(monkeypatch):
+    import asyncio
+    from contextlib import asynccontextmanager
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    import app.billing.tron_watcher as watcher
+    monkeypatch.setattr(watcher, 'settings', replace(watcher.settings,
+        tron_watcher_enabled=True, tron_account_xpub='test-xpub', trongrid_api_key=None,
+        tron_sweep_enabled=False))
+    stop = asyncio.Event()
+    async def deposits(*args):
+        stop.set()
+        return []
+    conn = SimpleNamespace(fetchval=AsyncMock(return_value=True), fetch=AsyncMock(side_effect=deposits))
+    @asynccontextmanager
+    async def acquire():
+        yield conn
+    @asynccontextmanager
+    async def client(**kwargs):
+        # No network-capable client is constructed by this test.
+        yield SimpleNamespace()
+    monkeypatch.setattr(watcher.httpx, 'AsyncClient', client)
+    asyncio.run(watcher.run_tron_watcher(SimpleNamespace(acquire=acquire), stop))
+    conn.fetch.assert_awaited_once()
+    assert conn.fetchval.await_count == 2  # Lease acquired and released.

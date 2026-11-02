@@ -49,13 +49,14 @@ async def lifespan(app: FastAPI):
         app.state.tron_watcher_task = None
         app.state.billing_automation_task = None
         cleanup.push_async_callback(_stop_workers, app)
-        app.state.billing_automation_task = asyncio.create_task(
-            run_billing_automation(app.state.db_pool, app.state.billing_automation_stop)
-        )
-        if settings.tron_watcher_enabled:
-            app.state.tron_watcher_task = asyncio.create_task(
-                run_tron_watcher(app.state.db_pool, app.state.tron_watcher_stop)
+        if settings.run_background_workers:
+            app.state.billing_automation_task = asyncio.create_task(
+                run_billing_automation(app.state.db_pool, app.state.billing_automation_stop)
             )
+            if settings.tron_watcher_enabled:
+                app.state.tron_watcher_task = asyncio.create_task(
+                    run_tron_watcher(app.state.db_pool, app.state.tron_watcher_stop)
+                )
         yield
 
 
