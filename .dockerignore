@@ -1,0 +1,13 @@
+.git
+.local
+.tools
+.env
+.env.*
+__pycache__
+**/__pycache__
+.pytest_cache
+*.dump
+*.backup
+*.zip
+*.session
+*.log
