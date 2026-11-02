@@ -1,0 +1,44 @@
+{
+  "server": "PostgreSQL 17.11 on x86_64-windows, compiled by msvc-19.44.35228, 64-bit",
+  "migrations": [
+    {
+      "file": "001_core_foundation.sql",
+      "executed": true,
+      "sha256": "b2d4e422e810aaeef41cc5e08907f9492bfd8b8f23bc9bc07f9ba219380264d8"
+    },
+    {
+      "file": "002_broadcast_channels.sql",
+      "executed": true,
+      "sha256": "c96ba56df9d249c0c95ee43e2e8e88457f895443b3cc66676d9fe475ebade11e"
+    },
+    {
+      "file": "003_group_moderation.sql",
+      "executed": true,
+      "sha256": "4706391c04014cff63b4a13b237e4ff12a3b117d2a9b9cc6162bc62817af5e76"
+    },
+    {
+      "file": "tgmate_v2_004_bidirectional.sql",
+      "executed": true,
+      "sha256": "412aa8926a9caae83a2eb5596d63a3a23655d7edb44de19949427f995974100c"
+    },
+    {
+      "file": "004a_relay_runtime.sql",
+      "executed": true,
+      "verified_runtime_table_present": true,
+      "sha256": "af8b94263285cee410c1e3af32dc0dea48493bf7a926b075d123f07eb25c4e3b"
+    },
+    {
+      "file": "004b_moderation_control_hardening.sql",
+      "executed": true,
+      "sha256": "1fcf017f0d812dbaae82bf1a32687f007d3d39841aa4d0f32a0f6927d1f8641e"
+    },
+    {
+      "file": "004c_web_auth.sql",
+      "executed": true,
+      "initial_executed_sha256": "1d9a4fe0cdd03ef6d3f247a399a92157ae33494cf91bdc5bf7629b593517c1f2",
+      "current_source_sha256": "feb8ca7b646dc0eccf65d148a0bf639dafed571766de300b84246288076e2205",
+      "post_apply_updates": "Expected-version login, password rotation, audit functions and tenant.read seed executed separately. Full source verification tracked in CLEAN_REBUILD_RESULTS.json."
+    }
+  ],
+  "production": false
+}

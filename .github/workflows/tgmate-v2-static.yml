@@ -1,0 +1,35 @@
+name: TGMate V2 static checks
+on:
+  pull_request:
+    paths: ['workstreams/tgmate-v2/**', '.github/workflows/tgmate-v2-static.yml']
+  push:
+    branches: ['integration/tgmate-v2-baseline', 'main']
+    paths: ['workstreams/tgmate-v2/**', '.github/workflows/tgmate-v2-static.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workstreams/tgmate-v2
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pglast==8.7
+      - run: python -m compileall -q app scripts tests
+      - name: Verify imported manifest
+        run: |
+          python - <<'PYCODE'
+          import json,hashlib
+          from pathlib import Path
+          manifest=json.loads(Path('UPLOAD_MANIFEST.json').read_text())
+          assert all(hashlib.sha256(Path(n).read_bytes()).hexdigest()==h for n,h in manifest.items())
+          PYCODE
+      - run: python validate_sql.py
