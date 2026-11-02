@@ -1,0 +1,22 @@
+{
+  "commit": "b6f2e0cb041bc95dcf363442658a04403a2408e1",
+  "production": false,
+  "run_url": "https://github.com/xe4716-svg/Tgsa/actions/runs/41481787002",
+  "jobs": [
+    {
+      "name": "container",
+      "conclusion": "success"
+    },
+    {
+      "name": "test",
+      "conclusion": "success"
+    }
+  ],
+  "compose_checks": [
+    "fresh tracked schemas before API/billing",
+    "API readiness with PostgreSQL and Redis",
+    "migration replay",
+    "runtime excludes administrator password",
+    "unauthenticated relay request rejected"
+  ]
+}

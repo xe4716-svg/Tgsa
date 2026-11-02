@@ -12,6 +12,7 @@ V1.2 context recovered from the existing “整合规划进度” chat: modular 
 - Separate commercial worker entrypoint and Compose service; API background work now defaults off.
 - Refuse-overwrite backups and restore-to-new-database tooling, with an actual restore and RLS rehearsal.
 - Explicit root/V2 identity mappings, current-session and permission checks, and offline linking/column-grant tools; verified against both schemas in one database.
+- Root-authenticated relay metadata API, separate tracked business migrations, and ordered combined initialization for Compose.
 
 The new read routes are /api/v1/telegram/accounts and /api/v1/proxies. They expose fixed metadata columns, never encrypted sessions or proxy credentials. They do not authorize account login, proxy changes, or message sending.
 
@@ -20,7 +21,7 @@ The new read routes are /api/v1/telegram/accounts and /api/v1/proxies. They expo
 | Area | Current boundary / work remaining |
 | --- | --- |
 | Identity and database unification | Explicit mapping and read-only permission bridge delivered; root and V2 schemas verified in one database. Business API wiring, existing-data migration and full unified deployment remain. Never match identities by email alone. |
-| Bot/group moderation/customer relay | Imported backend exists; unified root application, complete console and persistent runtime integration remain. |
+| Bot/group moderation/customer relay | Root-authenticated customer-relay metadata reads delivered. Mutating APIs, complete console, moderation/broadcast integration and persistent Telegram runtime remain. |
 | Bot and account broadcast | Preserve separate identities, endpoints, queues, budgets, quotas, rate policies and statistics. Root integration remains. |
 | Account authorization and proxies | Existing login/session/proxy components plus new metadata reads; gateway ownership, controlled writes and full UI remain. |
 | Channel/group clone | Historical/realtime handoff, durable mapping, edit/delete, media groups and authorized Telegram integration remain. |

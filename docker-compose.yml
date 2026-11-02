@@ -2,20 +2,30 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: tgs
+      POSTGRES_DB: ${POSTGRES_DB:-tgs}
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-local-postgres-password}
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-dev-only-change-me}
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d tgs"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-tgs}"]
       interval: 5s
       timeout: 3s
       retries: 20
+
+  migrate:
+    build: .
+    command: ["python", "scripts/bootstrap_combined.py"]
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGDATABASE: ${POSTGRES_DB:-tgs}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine
@@ -31,22 +41,24 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "8025:8025"
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+
   api:
     build: .
     env_file:
-      - .env
+      - .env.runtime
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://tgs_runtime:dev-only-change-me@db:5432/tgs}
       RUN_BACKGROUND_WORKERS: "false"
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 5s
+      timeout: 7s
+      retries: 24
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       mailpit:
@@ -56,15 +68,11 @@ services:
     build: .
     command: ["python", "-m", "app.workers.billing"]
     env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://tgs_runtime:dev-only-change-me@db:5432/tgs}
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      - .env.runtime
     stop_grace_period: 60s
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       mailpit:
         condition: service_started
 

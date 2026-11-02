@@ -34,6 +34,8 @@ jobs:
       TGMATE_MIGRATION_INTEGRATION: '1'
       TGMATE_RESOURCE_INTEGRATION: '1'
       TGMATE_IDENTITY_INTEGRATION: '1'
+      TGMATE_BUSINESS_READS_INTEGRATION: '1'
+      TGMATE_BUSINESS_MIGRATION_INTEGRATION: '1'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -50,7 +52,7 @@ jobs:
 
   container:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,3 +61,5 @@ jobs:
         run: docker build --tag tgmate-ci .
       - name: Verify both process entrypoints exist
         run: docker run --rm tgmate-ci python -c "import app.main; import app.workers.billing"
+      - name: Verify isolated Compose startup and migration replay
+        run: python3 scripts/container_smoke.py
