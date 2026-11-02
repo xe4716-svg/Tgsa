@@ -1,6 +1,6 @@
 # External AI collaboration handoff
 
-Repository: xe4716-svg/Tgsa. Current implementation base: codex/worker-recovery at f16dff5050984ccb68455bc274e85aa93b1e3706 (PR #19). main and integration/mvp do not yet contain these stacked changes. Pull current PR state before starting; do not overwrite another branch or assume a merged baseline.
+Repository: xe4716-svg/Tgsa. Current shared implementation base: codex/identity-integration (PR #20), stacked on codex/worker-recovery (PR #19). main and integration/mvp do not yet contain these changes. Pull current PR state before starting; do not overwrite another branch or assume a merged baseline.
 
 ## Work already owned by the coordinator
 
