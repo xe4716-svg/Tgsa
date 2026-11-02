@@ -13,7 +13,23 @@ from app.billing.payments import router as payments_router
 from app.billing.tron_watcher import run_tron_watcher
 from app.config import settings, validate_startup_settings
 from app.health import router as health_router
+from app.telegram.login_manager import TelegramLoginManager
+from app.telegram.router import router as telegram_router
 
+
+
+async def run_telegram_cleanup(manager: TelegramLoginManager, stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await manager.cleanup_expired()
+            await asyncio.wait_for(stop_event.wait(), timeout=60.0)
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,9 +53,19 @@ async def lifespan(app: FastAPI):
         app.state.tron_watcher_task = asyncio.create_task(
             run_tron_watcher(app.state.db_pool, app.state.tron_watcher_stop)
         )
+
+    app.state.telegram_login_manager = TelegramLoginManager()
+    app.state.telegram_cleanup_stop = asyncio.Event()
+    app.state.telegram_cleanup_task = asyncio.create_task(
+        run_telegram_cleanup(app.state.telegram_login_manager, app.state.telegram_cleanup_stop)
+    )
     try:
         yield
     finally:
+        app.state.telegram_cleanup_stop.set()
+        await app.state.telegram_cleanup_task
+        await app.state.telegram_login_manager.shutdown()
+
         app.state.billing_automation_stop.set()
         await app.state.billing_automation_task
         if app.state.tron_watcher_task:
@@ -60,6 +86,7 @@ app.include_router(billing_router)
 app.include_router(commerce_router)
 app.include_router(payments_router)
 app.include_router(billing_automation_router)
+app.include_router(telegram_router)
 
 
 @app.get("/")
