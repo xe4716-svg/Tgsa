@@ -8,7 +8,7 @@ import asyncpg
 import pytest
 
 from app.security.session_vault import SessionVault, EncryptedSession
-from app.telegram.account_persistence import persist_authorized_account
+from app.telegram.account_persistence import persist_authorized_account, finish_authorized_account
 from app.telegram.proxy_revision import proxy_revision
 
 
@@ -41,6 +41,12 @@ def test_account_session_proxy_and_consent_commit_atomically():
             assert await owner.fetchval('SELECT count(*) FROM telegram_accounts WHERE tenant_id=$1',tenant)==0
             await owner.execute("UPDATE proxy_profiles SET host='proxy.example.test' WHERE id=$1",proxy)
             account_id = await persist_authorized_account(**kwargs)
+            from app.telegram.gateway_leases import GatewayLeases
+            assert await owner.fetchval('SELECT status FROM telegram_accounts WHERE id=$1',account_id)=='PENDING'
+            assert await GatewayLeases(runtime).acquire(tenant,account_id,'premature') is None
+            assert await finish_authorized_account(runtime,tenant_id=tenant,user_id=user,family_id=family_id,account_id=account_id)
+            assert await finish_authorized_account(runtime,tenant_id=tenant,user_id=user,family_id=family_id,account_id=account_id)
+            assert await owner.fetchval('SELECT status FROM telegram_accounts WHERE id=$1',account_id)=='AUTHORIZED'
             row=await owner.fetchrow('SELECT * FROM telegram_sessions WHERE account_id=$1',account_id)
             assert b'synthetic-session-secret' not in bytes(row['ciphertext'])
             record=EncryptedSession(**{k:row[k] for k in ('ciphertext','nonce','wrapped_dek','kms_key_id','encryption_version')})
@@ -164,4 +170,95 @@ def test_gateway_lease_ownership_fencing_and_rls():
             await pool.close()
             await owner.execute('DELETE FROM tenants WHERE id=ANY($1::uuid[])',[tenant,other])
             await owner.close()
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(os.getenv('TGMATE_LOGIN_INTEGRATION') != '1', reason='disposable database opt-in required')
+@pytest.mark.parametrize('mode,fault',[('DIRECT','material'),('PROXY','material'),('DIRECT','disconnect'),('PROXY','disconnect'),('DIRECT','paused'),('PROXY','paused'),('PROXY','proxy_invalid')])
+def test_owned_gateway_loads_encrypted_material_and_stops_when_it_changes(mode,fault):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.security.proxy_vault import ProxyVault
+    from app.telegram.gateway_runtime import GatewayRunner,GatewayCloseUncertain
+    async def run():
+        owner=await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
+        pool=await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'],min_size=1,max_size=5)
+        tenant,account,proxy=[uuid4() for _ in range(3)]
+        telegram_id=secrets.randbelow(2**50)+1
+        vault=SessionVault(b'x'*32,'test-key');session='private-synthetic-session'
+        client=SimpleNamespace(connect=AsyncMock(),is_user_authorized=AsyncMock(return_value=True),
+            get_me=AsyncMock(return_value=SimpleNamespace(id=telegram_id)),disconnect=AsyncMock(),
+            disconnected=asyncio.get_running_loop().create_future())
+        task=None;stop=asyncio.Event();ready=asyncio.Event()
+        try:
+            await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'owned-gateway')",tenant)
+            await owner.execute("INSERT INTO telegram_accounts(id,tenant_id,telegram_user_id,status,connection_mode) VALUES($1,$2,$3,'AUTHORIZED',$4)",account,tenant,telegram_id,mode)
+            record=vault.encrypt(tenant,account,session)
+            await owner.execute('INSERT INTO telegram_sessions(account_id,tenant_id,ciphertext,nonce,wrapped_dek,kms_key_id,encryption_version) VALUES($1,$2,$3,$4,$5,$6,$7)',account,tenant,record.ciphertext,record.nonce,record.wrapped_dek,record.kms_key_id,record.encryption_version)
+            if mode=='PROXY':
+                blob=ProxyVault(b'x'*32,'test-key').encode_credentials(tenant,proxy,{'username':'synthetic','password':'private-proxy-password'})
+                await owner.execute("INSERT INTO proxy_profiles(id,tenant_id,proxy_type,host,port,credentials_ciphertext,secret_version,verification_status) VALUES($1,$2,'SOCKS5','proxy.example.test',1080,$3,'test-key','VERIFIED')",proxy,tenant,blob)
+                await owner.execute("INSERT INTO account_proxy_bindings(tenant_id,account_id,proxy_profile_id,allocation_mode) VALUES($1,$2,$3,'SHARED')",tenant,account,proxy)
+            def factory(value,**kwargs):
+                assert value==session and kwargs['managed'] is True and kwargs['connection_mode']==mode
+                if mode=='PROXY':assert kwargs['proxy_profile']['password']=='private-proxy-password'
+                else:assert kwargs['proxy_profile'] is None
+                return client
+            runner=GatewayRunner(pool,vault,'owned-test',ttl=10,heartbeat=.02,control_timeout=1,rpc_timeout=2,client_factory=factory)
+            task=asyncio.create_task(runner.run(tenant,account,stop,ready=ready))
+            await asyncio.wait_for(ready.wait(),5)
+            assert await owner.fetchval('SELECT security_state FROM telegram_accounts WHERE id=$1',account)=='NEW_DEVICE'
+            if fault=='disconnect':
+                client.disconnect.side_effect=OSError('synthetic close failure')
+                stop.set()
+                with pytest.raises(GatewayCloseUncertain):await asyncio.wait_for(task,5)
+                state=await owner.fetchrow('SELECT status,security_state FROM telegram_accounts WHERE id=$1',account)
+                assert dict(state)=={'status':'PAUSED','security_state':'GATEWAY_CLOSE_UNCERTAIN'}
+                assert await owner.fetchval("SELECT count(*) FROM account_security_events WHERE tenant_id=$1 AND severity='CRITICAL'",tenant)==1
+                assert await owner.fetchval("SELECT count(*) FROM audit_logs WHERE tenant_id=$1 AND action='GATEWAY_DISCONNECT_UNCERTAIN'",tenant)==1
+                assert await owner.fetchval('SELECT lease_expires_at>clock_timestamp() FROM account_gateway_leases WHERE account_id=$1',account)
+                return
+            if fault=='paused':await owner.execute("UPDATE telegram_accounts SET status='PAUSED' WHERE id=$1",account)
+            elif fault=='proxy_invalid':await owner.execute("UPDATE proxy_profiles SET status='FAILED' WHERE id=$1",proxy)
+            elif mode=='PROXY':await owner.execute("UPDATE proxy_profiles SET host='changed.example.test' WHERE id=$1",proxy)
+            else:await owner.execute("UPDATE telegram_sessions SET nonce=$1 WHERE account_id=$2",b'z'*12,account)
+            result=await asyncio.wait_for(task,5)
+            assert result.reason=={'material':'MATERIAL_CHANGED','paused':'OWNERSHIP_LOST','proxy_invalid':'MATERIAL_UNAVAILABLE'}[fault]
+            client.disconnect.assert_awaited_once();client.get_me.assert_awaited_once()
+            assert await owner.fetchval('SELECT lease_expires_at<=clock_timestamp() FROM account_gateway_leases WHERE account_id=$1',account)
+            # The runner cannot turn read-only NEW_DEVICE into publishing rights.
+            assert await owner.fetchval('SELECT security_state FROM telegram_accounts WHERE id=$1',account)=='NEW_DEVICE'
+        finally:
+            stop.set()
+            if task and not task.done():await asyncio.wait_for(task,5)
+            await pool.close()
+            await owner.execute('DELETE FROM tenants WHERE id=$1',tenant)
+            await owner.close()
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(os.getenv('TGMATE_LOGIN_INTEGRATION') != '1', reason='disposable database opt-in required')
+def test_gateway_server_wait_is_durable_and_fences_previous_owner():
+    from app.telegram.gateway_leases import GatewayLeases
+    async def run():
+        owner=await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
+        pool=await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'],min_size=1,max_size=2)
+        tenant,account=uuid4(),uuid4()
+        store=GatewayLeases(pool)
+        try:
+            await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'gateway-wait')",tenant)
+            await owner.execute("INSERT INTO telegram_accounts(id,tenant_id,status) VALUES($1,$2,'AUTHORIZED')",account,tenant)
+            first=await store.acquire(tenant,account,'worker-a')
+            assert await store.defer(first,120)
+            assert not await store.renew(first) and not await store.release(first)
+            second_process=GatewayLeases(pool)
+            assert await second_process.acquire(tenant,account,'worker-b') is None
+            wait=await owner.fetchval('SELECT extract(epoch FROM lease_expires_at-clock_timestamp()) FROM account_gateway_leases WHERE account_id=$1',account)
+            assert wait>115
+            await owner.execute("UPDATE account_gateway_leases SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE account_id=$1",account)
+            next_lease=await second_process.acquire(tenant,account,'worker-b')
+            assert next_lease.fencing_token==first.fencing_token+2
+            assert not await store.defer(first,1000)
+        finally:
+            await pool.close();await owner.execute('DELETE FROM tenants WHERE id=$1',tenant);await owner.close()
     asyncio.run(run())

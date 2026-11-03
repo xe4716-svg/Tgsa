@@ -48,6 +48,7 @@ class PendingLogin:
     proxy_revision: str | None = None
     notice_version: str = "v1.0"
     rejected_attempts: int = 0
+    connection_closed: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -413,21 +414,30 @@ class TelegramLoginManager:
             "proxy_revision": pending.proxy_revision,
         }
 
-    async def mark_consumed(self, login_id: str, tenant_id: str, user_id: str, account_id: str) -> None:
+    async def mark_consumed(self, login_id: str, tenant_id: str, user_id: str, account_id: str) -> bool:
         # The caller holds the flow lock. A database commit remains successful
         # even if the login TTL elapsed while PostgreSQL was completing it.
         pending = self._pending.get(login_id)
         if not pending or pending.tenant_id != tenant_id or pending.user_id != user_id:
             raise PermissionError("Login flow not found")
         if pending.status != "AUTHORIZED":
-            return
+            return pending.connection_closed
         pending.status = "CONSUMED"
         pending.account_id = account_id
         pending.session_string = None
+        return await self.confirm_disconnected(login_id,tenant_id,user_id)
+
+    async def confirm_disconnected(self,login_id,tenant_id,user_id):
+        pending=self._pending.get(login_id)
+        if not pending or pending.tenant_id!=tenant_id or pending.user_id!=user_id:
+            raise PermissionError('Login flow not found')
+        if pending.connection_closed:return True
         try:
-            await asyncio.wait_for(pending.client.disconnect(), timeout=5)
+            await asyncio.wait_for(pending.client.disconnect(),timeout=5)
+            pending.connection_closed=True
         except Exception:
-            pass  # Persisted successfully; disconnect failure must not repeat the write.
+            pass
+        return pending.connection_closed
 
     async def _dispose(self, pending: PendingLogin) -> None:
         async with pending.lock:

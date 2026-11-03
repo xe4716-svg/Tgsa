@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from app.auth.dependencies import AuthPrincipal, get_current_principal
 from app.config import settings
 from app.security.session_vault import SessionVault
-from app.telegram.account_persistence import persist_authorized_account
+from app.telegram.account_persistence import persist_authorized_account, finish_authorized_account
 from app.telegram.authorization import lock_login_authority
 from app.telegram.login_manager import LoginThrottled, LoginTransportUnavailable
 
@@ -288,6 +288,9 @@ async def consume_login(
             )
 
             if "account_id" in auth_data:
+                if await manager.confirm_disconnected(login_id,str(principal.tenant_id),str(principal.user_id)):
+                    await finish_authorized_account(request.app.state.db_pool,tenant_id=principal.tenant_id,
+                        user_id=principal.user_id,family_id=principal.family_id,account_id=UUID(auth_data["account_id"]))
                 return {"account_id": auth_data["account_id"]}
 
             if auth_data["notice_version"] != body.notice_version:
@@ -318,9 +321,12 @@ async def consume_login(
                 notice_version=body.notice_version,
             )
 
-            await manager.mark_consumed(
+            closed=await manager.mark_consumed(
                 login_id, str(principal.tenant_id), str(principal.user_id), str(account_id)
             )
+            if closed:
+                await finish_authorized_account(pool,tenant_id=principal.tenant_id,user_id=principal.user_id,
+                    family_id=principal.family_id,account_id=account_id)
 
             return {"account_id": str(account_id)}
     except Exception as exc:

@@ -70,8 +70,8 @@ jobs:
           persist-credentials: false
       - name: Build API and worker image
         run: docker build --tag tgmate-ci .
-      - name: Verify both process entrypoints exist
-        run: docker run --rm tgmate-ci python -c "import app.main; import app.workers.billing"
+      - name: Verify API and worker entrypoints exist
+        run: docker run --rm tgmate-ci python -c "import app.main; import app.workers.billing; import app.workers.mtproto"
       - name: Verify isolated Compose startup and migration replay
         run: python3 scripts/container_smoke.py
 

@@ -26,6 +26,7 @@ def env(monkeypatch):
     app = FastAPI()
     app.include_router(router)
     monkeypatch.setattr('app.telegram.login_router._record_consent', AsyncMock())
+    monkeypatch.setattr('app.telegram.login_router.finish_authorized_account', AsyncMock(return_value=True))
     manager = TelegramLoginManager()
     app.state.telegram_login_manager = manager
     principal = AuthPrincipal(uuid4(), uuid4(), uuid4(), 'OWNER', 'test@example.test', False)
@@ -236,3 +237,43 @@ async def test_login_capacity_and_telegram_wait_map_to_retry_after(env, monkeypa
             monkeypatch.setattr(manager,'start_qr',start)
             result=await client.post('/telegram/login/qr',json={'connection_mode':'DIRECT','notice_version':'v1.0','risk_acknowledged':True})
             assert result.status_code==429 and result.headers['retry-after']==str(error.retry_after)
+
+
+@pytest.mark.anyio
+async def test_failed_disconnect_never_activates_and_retry_only_finishes_handoff(env,monkeypatch):
+    app,manager,principal=env
+    pending=add_pending(manager,principal)
+    pending.client.disconnect.side_effect=[OSError('synthetic'),None]
+    identifier=uuid4()
+    persist=AsyncMock(return_value=identifier);finish=AsyncMock(return_value=True)
+    monkeypatch.setattr('app.telegram.login_router.persist_authorized_account',persist)
+    monkeypatch.setattr('app.telegram.login_router.finish_authorized_account',finish)
+    app.state.db_pool=object()
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+        first=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
+        assert first.status_code==200 and not pending.connection_closed
+        finish.assert_not_awaited()
+        second=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
+        assert second.status_code==200 and pending.connection_closed
+    assert first.json()==second.json()=={'account_id':str(identifier)}
+    persist.assert_awaited_once();finish.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_activation_database_failure_retries_without_repeating_account_or_disconnect(env,monkeypatch):
+    import asyncpg
+    app,manager,principal=env
+    pending=add_pending(manager,principal)
+    identifier=uuid4()
+    persist=AsyncMock(return_value=identifier)
+    finish=AsyncMock(side_effect=[asyncpg.PostgresError('private db credential'),True])
+    monkeypatch.setattr('app.telegram.login_router.persist_authorized_account',persist)
+    monkeypatch.setattr('app.telegram.login_router.finish_authorized_account',finish)
+    app.state.db_pool=object()
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+        first=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
+        assert first.status_code==503 and 'private db' not in first.text
+        second=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
+        assert second.status_code==200
+    persist.assert_awaited_once();pending.client.disconnect.assert_awaited_once()
+    assert finish.await_count==2 and pending.session_string is None

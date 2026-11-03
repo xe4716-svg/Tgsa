@@ -116,7 +116,7 @@ async def persist_authorized_account(
                     tenant_id, telegram_user_id, phone_masked, username,
                     display_name, status, security_state, connection_mode
                 )
-                VALUES ($1, $2, $3, $4, $5, 'AUTHORIZED', 'NEW_DEVICE', $6)
+                VALUES ($1, $2, $3, $4, $5, 'PENDING', 'NEW_DEVICE', $6)
                 RETURNING id
                 """,
                 tenant_id,
@@ -180,14 +180,36 @@ async def persist_authorized_account(
                     tenant_id, actor_user_id, action, resource_type,
                     resource_id, details
                 )
-                VALUES ($1, $2, 'TELEGRAM_ACCOUNT_CONNECTED',
+                VALUES ($1, $2, 'TELEGRAM_AUTHORIZATION_STORED',
                         'telegram_account', $3, $4::jsonb)
                 """,
                 tenant_id,
                 user_id,
                 account_id,
-                '{"connection_stage":"authorized","security_state":"NEW_DEVICE"}',
+                '{"connection_stage":"awaiting_disconnect","security_state":"NEW_DEVICE"}',
             )
 
             await lock_login_authority(conn, tenant_id, user_id, family_id)
             return account_id
+
+
+async def finish_authorized_account(pool,*,tenant_id,user_id,family_id,account_id):
+    """Activate only after the originating login client confirmed disconnect.
+
+    The caller's proof is internal coordinator state, never a request-body flag.
+    PENDING survives failed handoff or process restart and cannot own a gateway.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id',$1,true)",str(tenant_id))
+            await conn.fetchrow('SELECT id FROM tenants WHERE id=$1 FOR UPDATE',tenant_id)
+            row=await conn.fetchrow('SELECT status,security_state FROM telegram_accounts WHERE tenant_id=$1 AND id=$2 FOR UPDATE',tenant_id,account_id)
+            await lock_login_authority(conn,tenant_id,user_id,family_id)
+            if not row:
+                raise PermissionError('Account not found')
+            if row['status']=='AUTHORIZED':return True
+            if row['status']!='PENDING' or row['security_state']!='NEW_DEVICE':return False
+            await conn.execute("UPDATE telegram_accounts SET status='AUTHORIZED',updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2",tenant_id,account_id)
+            await conn.execute("INSERT INTO audit_logs(tenant_id,actor_user_id,action,resource_type,resource_id,details) VALUES($1,$2,'TELEGRAM_ACCOUNT_CONNECTED','telegram_account',$3,'{\"connection_stage\":\"login_disconnected\",\"security_state\":\"NEW_DEVICE\"}'::jsonb)",tenant_id,user_id,account_id)
+            await lock_login_authority(conn,tenant_id,user_id,family_id)
+            return True

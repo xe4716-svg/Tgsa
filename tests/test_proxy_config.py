@@ -45,3 +45,12 @@ def test_connection_choice_must_be_explicit():
     with pytest.raises(ValueError):
         validate_connection_choice("DIRECT", VERIFIED_SOCKS)
     validate_connection_choice("DIRECT", None)
+
+
+def test_managed_client_constructor_accepts_installed_telethon_contract(monkeypatch):
+    from types import SimpleNamespace
+    from app.telegram import client_factory
+    monkeypatch.setattr(client_factory,'settings',SimpleNamespace(telegram_api_id=123,telegram_api_hash='s'*32))
+    client=client_factory.create_client(connection_mode='DIRECT',managed=True)
+    assert not client.is_connected()
+    assert client.flood_sleep_threshold==0

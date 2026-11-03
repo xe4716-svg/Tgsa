@@ -80,6 +80,7 @@ def create_client(
     *,
     connection_mode: ConnectionMode,
     proxy_profile: dict[str, Any] | None = None,
+    managed: bool = False,
 ):
     """Create a Telethon client with an explicit, user-selected route."""
     from telethon import TelegramClient
@@ -96,9 +97,10 @@ def create_client(
 
     kwargs: dict[str, Any] = {
         "proxy": proxy,
-        "connection_retries": 3,
-        "request_retries": 3,
-        "auto_reconnect": True,
+        "connection_retries": 0 if managed else 3,
+        "request_retries": 0 if managed else 3,
+        "auto_reconnect": not managed,
+        "receive_updates": not managed,
         "flood_sleep_threshold": 0,
         "retry_delay": 2,
         "timeout": 10,
