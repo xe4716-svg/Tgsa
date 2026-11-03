@@ -89,16 +89,7 @@ async def test_unread_count_and_read_all_isolation_and_idempotency(mock_principa
 
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO tenants (id, name, status) VALUES ($1, 'T1', 'ACTIVE'), ($2, 'T2', 'ACTIVE')", tenant_1, tenant_2)
-            await conn.execute(
-                """
-                INSERT INTO users (id, auth_subject, email, status)
-                VALUES
-                    ($1, 'ci-billing-user-1', 'u1@t.com', 'ACTIVE'),
-                    ($2, 'ci-billing-user-2', 'u2@t.com', 'ACTIVE')
-                """,
-                user_1,
-                user_2,
-            )
+            await conn.execute("INSERT INTO users (id, email, status) VALUES ($1, 'u1@t.com', 'ACTIVE'), ($2, 'u2@t.com', 'ACTIVE')", user_1, user_2)
             await conn.execute("INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, 'OWNER')", tenant_1, user_1)
             await conn.execute("INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, 'MEMBER')", tenant_1, user_2)
             await conn.execute("INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, 'OWNER')", tenant_2, user_1)
