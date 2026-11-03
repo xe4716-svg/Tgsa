@@ -74,7 +74,7 @@ CREATE TABLE public.gateway_account_command_events (
     command_id UUID NOT NULL,
     account_id UUID NOT NULL,
     transition TEXT NOT NULL CHECK (transition IN (
-        'submitted', 'claimed', 'dispatch_started', 'succeeded',
+        'submitted', 'claimed', 'dispatch_started', 'requeued', 'succeeded',
         'rejected', 'flood_wait', 'unknown', 'cancelled', 'reconciled'
     )),
     actor_class TEXT NOT NULL CHECK (actor_class IN ('business_worker', 'gateway', 'operator')),
