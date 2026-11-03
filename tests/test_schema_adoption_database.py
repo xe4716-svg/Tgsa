@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 psycopg=pytest.importorskip('psycopg')
 from psycopg import sql
-from scripts.migrate_business import FILES
+from scripts.migrate_business import BASELINE_FILES as FILES
 
 @pytest.mark.skipif(os.getenv('TGMATE_SCHEMA_ADOPTION_INTEGRATION')!='1',reason='disposable cluster opt-in required')
 def test_legacy_adoption_preserves_data_and_rolls_back_failures(tmp_path):
@@ -88,7 +88,9 @@ def test_legacy_adoption_preserves_data_and_rolls_back_failures(tmp_path):
             assert query('SELECT to_regprocedure(%s)',(signature,))[0][0] is None
             assert subprocess.run([sys.executable,str(root/'scripts/migrate_business.py'),'--psql',psql],env=env,capture_output=True).returncode==0
             code,report=cli()
-            assert code==0 and report['schema_equal'] and report['already_tracked']
+            # Forward migrations intentionally change the adopted baseline.
+            assert code!=0 and not report['schema_equal'] and report['already_tracked']
+            assert query("SELECT ai_mode FROM tgmate.moderation_platform_defaults")[0][0]=='off'
             assert cli('--apply','--backup-output',str(tmp_path/'duplicate.dump'))[0]!=0
             assert not (tmp_path/'duplicate.dump').exists()
             query(sql.SQL('DROP OWNED BY {}').format(sql.Identifier(owner_role)))

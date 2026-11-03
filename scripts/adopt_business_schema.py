@@ -10,7 +10,7 @@ import sys
 from uuid import uuid4
 if __package__ in (None,''):
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from scripts.migrate_business import FILES,LOCK
+from scripts.migrate_business import BASELINE_FILES as FILES, LOCK
 
 CATALOG_SQL = """
 SET search_path=pg_catalog,public;

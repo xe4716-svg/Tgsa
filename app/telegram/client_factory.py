@@ -85,6 +85,7 @@ def create_client(
     from telethon import TelegramClient
     from telethon.sessions import StringSession
 
+    connection_mode = str(connection_mode).upper()
     _require_api_credentials()
     validate_connection_choice(connection_mode, proxy_profile)
 

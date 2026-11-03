@@ -794,6 +794,50 @@ async def list_billing_notifications(
     }
 
 
+@router.get("/billing/notifications/unread-count")
+async def get_unread_billing_notifications_count(
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(principal.tenant_id))
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM tenant_notifications
+                WHERE tenant_id = $1 AND user_id = $2 AND read_at IS NULL
+                """,
+                principal.tenant_id,
+                principal.user_id,
+            )
+    return {"unread_count": count}
+
+
+@router.post("/billing/notifications/read-all")
+async def mark_all_billing_notifications_read(
+    request: Request,
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    async with request.app.state.db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(principal.tenant_id))
+            status = await conn.execute(
+                """
+                UPDATE tenant_notifications
+                SET read_at = NOW()
+                WHERE tenant_id = $1 AND user_id = $2 AND read_at IS NULL
+                """,
+                principal.tenant_id,
+                principal.user_id,
+            )
+            try:
+                updated_count = int(status.split()[1]) if status.startswith("UPDATE ") else 0
+            except (IndexError, ValueError):
+                updated_count = 0
+    return {"status": "ok", "updated_count": updated_count}
+
+
 @router.post("/billing/notifications/{notification_id}/read")
 async def mark_billing_notification_read(
     notification_id: UUID,

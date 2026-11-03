@@ -6,6 +6,7 @@ import asyncpg
 
 from app.security.session_vault import SessionVault
 from app.telegram.client_factory import validate_connection_choice
+from app.telegram.proxy_revision import proxy_revision
 from app.billing.service import FeatureLimitReached, ensure_limit
 
 
@@ -90,18 +91,21 @@ async def persist_authorized_account(
             if mode == "PROXY":
                 proxy_row = await conn.fetchrow(
                     """
-                    SELECT id
+                    SELECT id, verified_sharing_mode, proxy_type, host, port, credentials_ciphertext, secret_version, verification_status, status
                     FROM proxy_profiles
                     WHERE tenant_id = $1
                       AND id = $2
                       AND status = 'ACTIVE'
                       AND verification_status = 'VERIFIED'
+                    FOR UPDATE
                     """,
                     tenant_id,
                     proxy_profile_id,
                 )
                 if not proxy_row:
                     raise ValueError("Selected proxy is not verified and active")
+                if proxy_revision(dict(proxy_row)) != proxy_profile.get("_revision"):
+                    raise ValueError("Proxy configuration changed; restart authorization")
 
             account_id = await conn.fetchval(
                 """
@@ -124,6 +128,15 @@ async def persist_authorized_account(
                 )[:160] or None,
                 mode,
             )
+
+            if mode == "PROXY":
+                await conn.execute(
+                    """INSERT INTO account_proxy_bindings
+                       (tenant_id, account_id, proxy_profile_id, allocation_mode)
+                       VALUES ($1,$2,$3,$4)""",
+                    tenant_id, account_id, proxy_profile_id,
+                    'EXCLUSIVE' if proxy_row['verified_sharing_mode'] == 'EXCLUSIVE' else 'SHARED',
+                )
 
             encrypted = vault.encrypt(tenant_id, account_id, session_string)
             await conn.execute(

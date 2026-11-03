@@ -97,14 +97,19 @@ def test_real_business_migration_lifecycle(tmp_path):
             changed.write_text('BEGIN;\nCREATE TABLE public.business_rollback_probe(id int);\nSELECT 1/0;\nCOMMIT;\n',encoding='utf-8')
             assert run('migrate_business.py', names[3],tmp_path/'source') != 0
             with psycopg.connect(**dict(config,dbname=names[3]),autocommit=True) as db:
-                assert db.execute('SELECT count(*) FROM public.business_schema_migrations').fetchone()[0] == 11
+                assert db.execute('SELECT count(*) FROM public.business_schema_migrations').fetchone()[0] == len(FILES)-1
                 assert db.execute("SELECT to_regclass('public.business_rollback_probe')").fetchone()[0] is None
             assert run('migrate_business.py', names[3]) == 0, 'Retry after rollback failed'
             assert run('bootstrap_combined.py', names[4]) == 0, 'Combined initialization failed'
             assert run('bootstrap_combined.py', names[4]) == 0, 'Combined repeat failed'
             with psycopg.connect(**dict(config,dbname=names[4]),autocommit=True) as db:
                 assert db.execute('SELECT count(*) FROM public.schema_migrations').fetchone()[0] == 10
-                assert db.execute('SELECT count(*) FROM public.business_schema_migrations').fetchone()[0] == 12
+                assert db.execute('SELECT count(*) FROM public.business_schema_migrations').fetchone()[0] == len(FILES)
+                assert db.execute("SELECT ai_mode FROM tgmate.moderation_platform_defaults").fetchone()[0] == 'off'
+                with pytest.raises(psycopg.errors.CheckViolation):
+                    db.execute("UPDATE tgmate.moderation_platform_defaults SET ai_mode='assist'")
+                with pytest.raises(psycopg.errors.CheckViolation):
+                    db.execute("INSERT INTO tgmate.moderation_ai_assessments(tenant_id,message_event_id,category,confidence,suggested_action) VALUES(gen_random_uuid(),gen_random_uuid(),'spam',0.9,'review')")
                 for table, column in [('tgmate.users','email'),('tgmate.web_credentials','password_hash'),
                                       ('tgmate.relay_conversations','customer_user_id')]:
                     assert db.execute("SELECT has_column_privilege('tgs_runtime',%s,%s,'SELECT')",(table,column)).fetchone()[0] is False
@@ -117,7 +122,7 @@ def test_real_business_migration_lifecycle(tmp_path):
                 with db.transaction():
                     db.execute('SET LOCAL ROLE tgs_runtime')
                     assert db.execute('SELECT id,status FROM tgmate.relay_conversations').fetchall() == []
-            evidence.update(passed=True, business_ledger_count=12, root_ledger_count=10,
+            evidence.update(passed=True, business_ledger_count=len(FILES), root_ledger_count=10,
                 checks=['first','repeat','original SQL hashes','drift rejection','missing root rejection',
                         'untracked schema rejection','failed file rollback','resume after failure',
                         'combined bootstrap first/repeat','sensitive columns denied','metadata columns readable',

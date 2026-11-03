@@ -4,7 +4,8 @@ import asyncio
 import re
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from contextlib import asynccontextmanager
 from typing import Any
 
 from app.telegram.client_factory import create_client
@@ -40,6 +41,12 @@ class PendingLogin:
     session_string: str | None = None
     account: dict[str, Any] | None = None
     error_code: str | None = None
+    connection_mode: str | None = None
+    proxy_profile_id: str | None = None
+    account_id: str | None = None
+    proxy_revision: str | None = None
+    notice_version: str = "v1.0"
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class TelegramLoginManager:
@@ -61,13 +68,14 @@ class TelegramLoginManager:
         *,
         connection_mode: str,
         proxy_profile: dict[str, Any] | None = None,
+        notice_version: str = "v1.0",
     ) -> dict[str, Any]:
         client = create_client(
             connection_mode=connection_mode,
             proxy_profile=proxy_profile,
         )
-        await client.connect()
         try:
+            await client.connect()
             qr = await client.qr_login()
         except Exception:
             await client.disconnect()
@@ -85,6 +93,11 @@ class TelegramLoginManager:
             expires_at=now + self.ttl_seconds,
             status="QR_PENDING",
             qr_login=qr,
+            lock=asyncio.Lock(),
+            notice_version=notice_version,
+            connection_mode=connection_mode,
+            proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
+            proxy_revision=proxy_profile.get("_revision") if proxy_profile else None,
         )
         async with self._lock:
             self._pending[login_id] = pending
@@ -140,6 +153,7 @@ class TelegramLoginManager:
         *,
         connection_mode: str,
         proxy_profile: dict[str, Any] | None = None,
+        notice_version: str = "v1.0",
     ) -> dict[str, Any]:
         if not PHONE_RE.fullmatch(phone):
             raise ValueError("Phone number must use international E.164 format")
@@ -147,8 +161,8 @@ class TelegramLoginManager:
             connection_mode=connection_mode,
             proxy_profile=proxy_profile,
         )
-        await client.connect()
         try:
+            await client.connect()
             sent = await client.send_code_request(phone)
         except Exception:
             await client.disconnect()
@@ -167,6 +181,11 @@ class TelegramLoginManager:
             status="CODE_REQUIRED",
             phone=phone,
             phone_code_hash=sent.phone_code_hash,
+            lock=asyncio.Lock(),
+            notice_version=notice_version,
+            connection_mode=connection_mode,
+            proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
+            proxy_revision=proxy_profile.get("_revision") if proxy_profile else None,
         )
         async with self._lock:
             self._pending[login_id] = pending
@@ -189,7 +208,7 @@ class TelegramLoginManager:
         self, login_id: str, tenant_id: str, user_id: str, code: str
     ) -> dict[str, Any]:
         pending = self._get_owned(login_id, tenant_id, user_id)
-        if pending.method != "PHONE" or pending.status != "CODE_REQUIRED":
+        if pending.method != "PHONE" or pending.status not in ("CODE_REQUIRED", "CODE_REJECTED"):
             raise ValueError("This login flow is not waiting for a phone code")
         if not code or len(code) > 16:
             raise ValueError("Invalid verification code")
@@ -213,7 +232,7 @@ class TelegramLoginManager:
         self, login_id: str, tenant_id: str, user_id: str, password: str
     ) -> dict[str, Any]:
         pending = self._get_owned(login_id, tenant_id, user_id)
-        if pending.status != "PASSWORD_REQUIRED":
+        if pending.status not in ("PASSWORD_REQUIRED", "PASSWORD_REJECTED"):
             raise ValueError("This login flow is not waiting for a 2FA password")
         if not password or len(password) > 1024:
             raise ValueError("Invalid 2FA password")
@@ -243,46 +262,73 @@ class TelegramLoginManager:
             "login_id": login_id,
             "method": pending.method,
             "status": pending.status,
-            "account": pending.account if pending.status == "AUTHORIZED" else None,
+            "account": pending.account if pending.status in ("AUTHORIZED", "CONSUMED") else None,
             "error_code": pending.error_code,
         }
+
+    @asynccontextmanager
+    async def acquire_login_lock(self, login_id: str, tenant_id: str, user_id: str):
+        pending = self._get_owned(login_id, tenant_id, user_id)
+        async with pending.lock:
+            self._get_owned(login_id, tenant_id, user_id)
+            yield
 
     async def consume_authorized(
         self, login_id: str, tenant_id: str, user_id: str
     ) -> dict[str, Any]:
         pending = self._get_owned(login_id, tenant_id, user_id)
+        if pending.status == "CONSUMED" and pending.account_id:
+            return {"account_id": pending.account_id}
         if pending.status != "AUTHORIZED" or not pending.session_string:
             raise ValueError("Login has not been authorized")
-        result = {
+        return {
             "session_string": pending.session_string,
             "account": pending.account,
+            "connection_mode": pending.connection_mode,
+            "proxy_profile_id": pending.proxy_profile_id,
+            "notice_version": pending.notice_version,
+            "proxy_revision": pending.proxy_revision,
         }
+
+    async def mark_consumed(self, login_id: str, tenant_id: str, user_id: str, account_id: str) -> None:
+        # The caller holds the flow lock. A database commit remains successful
+        # even if the login TTL elapsed while PostgreSQL was completing it.
+        pending = self._pending.get(login_id)
+        if not pending or pending.tenant_id != tenant_id or pending.user_id != user_id:
+            raise PermissionError("Login flow not found")
+        if pending.status != "AUTHORIZED":
+            return
+        pending.status = "CONSUMED"
+        pending.account_id = account_id
         pending.session_string = None
-        await pending.client.disconnect()
-        self._pending.pop(login_id, None)
-        return result
+        try:
+            await asyncio.wait_for(pending.client.disconnect(), timeout=5)
+        except Exception:
+            pass  # Persisted successfully; disconnect failure must not repeat the write.
+
+    async def _dispose(self, pending: PendingLogin) -> None:
+        async with pending.lock:
+            task = pending.wait_task
+            if task and not task.done():
+                task.cancel()
+            if task:
+                await asyncio.gather(task, return_exceptions=True)
+            pending.session_string = None
+            try:
+                await asyncio.wait_for(pending.client.disconnect(), timeout=5)
+            except Exception:
+                pass
+            finally:
+                self._pending.pop(pending.login_id, None)
 
     async def cancel(self, login_id: str, tenant_id: str, user_id: str) -> None:
         pending = self._get_owned(login_id, tenant_id, user_id)
-        if pending.wait_task and not pending.wait_task.done():
-            pending.wait_task.cancel()
-        pending.session_string = None
-        await pending.client.disconnect()
-        self._pending.pop(login_id, None)
+        await self._dispose(pending)
 
     async def cleanup_expired(self) -> int:
-        now = time.time()
-        expired = [
-            (login_id, item)
-            for login_id, item in list(self._pending.items())
-            if item.expires_at < now
-        ]
-        for login_id, item in expired:
-            if item.wait_task and not item.wait_task.done():
-                item.wait_task.cancel()
-            item.session_string = None
-            try:
-                await item.client.disconnect()
-            finally:
-                self._pending.pop(login_id, None)
+        expired = [item for item in list(self._pending.values()) if item.expires_at < time.time()]
+        await asyncio.gather(*(self._dispose(item) for item in expired))
         return len(expired)
+
+    async def shutdown(self) -> None:
+        await asyncio.gather(*(self._dispose(item) for item in list(self._pending.values())))

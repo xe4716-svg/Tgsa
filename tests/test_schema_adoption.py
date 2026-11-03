@@ -13,7 +13,7 @@ def test_identifier_and_fingerprints_are_deterministic():
     assert digest({'a':1,'b':2})==digest({'b':2,'a':1})
 
 def test_release_checks_import_manifest(tmp_path):
-    from scripts.migrate_business import FILES
+    from scripts.migrate_business import BASELINE_FILES as FILES
     import hashlib
     manifest={}
     for name in FILES:

@@ -11,7 +11,7 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.migrate import build_script as root_script
 
-FILES = (
+BASELINE_FILES = (
     'source_001_003/001_core_foundation.sql',
     'source_001_003/002_broadcast_channels.sql',
     'source_001_003/003_group_moderation.sql',
@@ -21,6 +21,7 @@ FILES = (
     '004f_relay_operator_auth.sql', '004g_operator_identity_invalidation.sql',
     '004h_relay_privacy_notice.sql',
 )
+FILES = BASELINE_FILES + ('004i_telegram_ai_safety.sql',)
 LOCK = '847293018422'
 
 
