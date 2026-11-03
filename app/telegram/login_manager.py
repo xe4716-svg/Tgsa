@@ -40,6 +40,10 @@ class PendingLogin:
     session_string: str | None = None
     account: dict[str, Any] | None = None
     error_code: str | None = None
+    connection_mode: str | None = None
+    proxy_profile_id: str | None = None
+    account_id: str | None = None
+    lock: asyncio.Lock | None = None
 
 
 class TelegramLoginManager:
@@ -85,6 +89,9 @@ class TelegramLoginManager:
             expires_at=now + self.ttl_seconds,
             status="QR_PENDING",
             qr_login=qr,
+            lock=asyncio.Lock(),
+            connection_mode=connection_mode,
+            proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
         )
         async with self._lock:
             self._pending[login_id] = pending
@@ -167,6 +174,9 @@ class TelegramLoginManager:
             status="CODE_REQUIRED",
             phone=phone,
             phone_code_hash=sent.phone_code_hash,
+            lock=asyncio.Lock(),
+            connection_mode=connection_mode,
+            proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
         )
         async with self._lock:
             self._pending[login_id] = pending
@@ -243,31 +253,49 @@ class TelegramLoginManager:
             "login_id": login_id,
             "method": pending.method,
             "status": pending.status,
-            "account": pending.account if pending.status == "AUTHORIZED" else None,
+            "account": pending.account if pending.status in ("AUTHORIZED", "CONSUMED") else None,
             "error_code": pending.error_code,
         }
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def acquire_login_lock(self, login_id: str, tenant_id: str, user_id: str):
+        pending = self._get_owned(login_id, tenant_id, user_id)
+        async with pending.lock:
+            yield
 
     async def consume_authorized(
         self, login_id: str, tenant_id: str, user_id: str
     ) -> dict[str, Any]:
         pending = self._get_owned(login_id, tenant_id, user_id)
+        if pending.status == "CONSUMED" and pending.account_id:
+            return {"account_id": pending.account_id}
         if pending.status != "AUTHORIZED" or not pending.session_string:
             raise ValueError("Login has not been authorized")
-        result = {
+        return {
             "session_string": pending.session_string,
             "account": pending.account,
+            "connection_mode": pending.connection_mode,
+            "proxy_profile_id": pending.proxy_profile_id,
         }
+
+    async def mark_consumed(self, login_id: str, tenant_id: str, user_id: str, account_id: str) -> None:
+        pending = self._get_owned(login_id, tenant_id, user_id)
+        if pending.status != "AUTHORIZED":
+            return
+        pending.status = "CONSUMED"
+        pending.account_id = account_id
         pending.session_string = None
         await pending.client.disconnect()
-        self._pending.pop(login_id, None)
-        return result
 
     async def cancel(self, login_id: str, tenant_id: str, user_id: str) -> None:
         pending = self._get_owned(login_id, tenant_id, user_id)
-        if pending.wait_task and not pending.wait_task.done():
-            pending.wait_task.cancel()
-        pending.session_string = None
-        await pending.client.disconnect()
+        async with pending.lock:
+            if pending.wait_task and not pending.wait_task.done():
+                pending.wait_task.cancel()
+            pending.session_string = None
+            await pending.client.disconnect()
         self._pending.pop(login_id, None)
 
     async def cleanup_expired(self) -> int:
@@ -286,3 +314,19 @@ class TelegramLoginManager:
             finally:
                 self._pending.pop(login_id, None)
         return len(expired)
+
+    async def shutdown(self) -> None:
+        tasks = []
+        for pending in self._pending.values():
+            if pending.wait_task and not pending.wait_task.done():
+                pending.wait_task.cancel()
+            pending.session_string = None
+            tasks.append(pending.client.disconnect())
+
+        if tasks:
+            for task in tasks:
+                try:
+                    await asyncio.wait_for(task, timeout=5.0)
+                except Exception:
+                    pass
+        self._pending.clear()
