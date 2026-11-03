@@ -128,3 +128,23 @@ class GatewayCommandStore:
             retry_after,
         )
         return bool(row and row["ok"])
+
+    async def recover_expired(
+        self, tenant_id: UUID, account_id: UUID, worker_id: str, fencing_token: int
+    ) -> tuple[int, int]:
+        """Requeue only commands proven not to have started dispatch.
+
+        Any expired claim with dispatch_started_at is made UNKNOWN and must be
+        reconciled; this method never retries a potentially delivered message.
+        """
+        row = await self._call(
+            tenant_id,
+            """SELECT requeued_before_dispatch, marked_unknown
+               FROM public.recover_expired_gateway_account_commands($1,$2,$3)""",
+            account_id,
+            worker_id,
+            fencing_token,
+        )
+        if row is None:
+            return (0, 0)
+        return (int(row["requeued_before_dispatch"]), int(row["marked_unknown"]))
