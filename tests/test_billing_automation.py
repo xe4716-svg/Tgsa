@@ -93,8 +93,8 @@ async def test_unread_count_and_read_all_isolation_and_idempotency(mock_principa
                 """
                 INSERT INTO users (id, auth_subject, email, status)
                 VALUES
-                    ($1, 'ci-billing-' || $1::text, 'u1@t.com', 'ACTIVE'),
-                    ($2, 'ci-billing-' || $2::text, 'u2@t.com', 'ACTIVE')
+                    ($1, 'ci-billing-user-1', 'u1@t.com', 'ACTIVE'),
+                    ($2, 'ci-billing-user-2', 'u2@t.com', 'ACTIVE')
                 """,
                 user_1,
                 user_2,
