@@ -20,6 +20,11 @@ BEGIN
        OR p_destination_peer_id = 0 OR p_text IS NULL OR length(p_text) NOT BETWEEN 1 AND 4096 THEN
         RAISE EXCEPTION 'invalid gateway command request' USING ERRCODE = '22023';
     END IF;
+    -- The submitter is a business worker: validate its root/business tenant
+    -- mapping and both tenant states instead of trusting a caller-set GUC.
+    IF NOT public.lock_business_worker_tenant(v_tenant) THEN
+        RAISE EXCEPTION 'business tenant mapping unavailable' USING ERRCODE = '42501';
+    END IF;
     IF NOT EXISTS (
         SELECT 1 FROM public.account_gateway_routes r
         JOIN public.telegram_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
