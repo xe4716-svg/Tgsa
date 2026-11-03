@@ -5,16 +5,16 @@ from uuid import UUID
 from fastapi import FastAPI,Header,HTTPException,Depends,Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from app.db import settings,transaction
-from app.relay import receive,Rejected
-from app.errors import DeferredIngress
-from app.auth_http import require_permission
+from .db import settings,transaction
+from .relay import receive,Rejected
+from .errors import DeferredIngress
+from .auth_http import require_permission
 from psycopg.types.json import Jsonb
 
 app=FastAPI(title='TGMate V2.0',docs_url=None,redoc_url=None,openapi_url=None)
 
 def authorized(request:Request,authorization: str=Header(default='')):
- from app.auth_http import authenticate
+ from .auth_http import authenticate
  return authenticate(request,authorization)
 
 @app.middleware('http')
@@ -118,7 +118,7 @@ def resolve(identifier:UUID,body:Resolution,who=Depends(authorized)):
   link=db.execute('SELECT * FROM tgmate.relay_runtime_links WHERE operation_id=%s',(identifier,)).fetchone()
   if not link: raise HTTPException(409,'缺少运行记录')
   db.execute('UPDATE tgmate.relay_operations SET status=%s,target_message_id=%s WHERE id=%s',(body.status,body.target_message_id,identifier))
-  from app.quota import settle
+  from .quota import settle
   settle(db,who['tenant_id'],link['task_id'],body.status=='succeeded')
   db.execute('UPDATE tgmate.task_registry SET status=%s WHERE id=%s',({'succeeded':'completed','failed':'failed','cancelled':'cancelled'}[body.status],link['task_id']))
   db.execute("UPDATE tgmate.task_deliveries SET status=%s,remote_message_ref=%s WHERE task_id=%s",({'succeeded':'succeeded','failed':'failed','cancelled':'skipped'}[body.status],str(body.target_message_id) if body.target_message_id else None,link['task_id']))
@@ -138,20 +138,20 @@ class BroadcastPlan(BaseModel):
 @app.post('/api/broadcast/plans')
 def broadcast_plan(body:BroadcastPlan,who=Depends(authorized)):
  require_permission(who,'broadcast.manage')
- from app.broadcast import create_plan
+ from .broadcast import create_plan
  try: return create_plan(who['tenant_id'],**body.model_dump())
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
 @app.get('/api/broadcast/plans/{identifier}/preview')
 def broadcast_preview(identifier:UUID,who=Depends(authorized)):
- from app.broadcast import preview
+ from .broadcast import preview
  try: return preview(who['tenant_id'],identifier)
  except Rejected as e: raise HTTPException(404,str(e)) from None
 
 @app.post('/api/broadcast/plans/{identifier}/start')
 def broadcast_start(identifier:UUID,who=Depends(authorized)):
  require_permission(who,'broadcast.manage')
- from app.broadcast import start_run
+ from .broadcast import start_run
  try: return start_run(who['tenant_id'],identifier)
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -161,7 +161,7 @@ class RunAction(BaseModel):
 @app.post('/api/broadcast/runs/{identifier}/state')
 def broadcast_state(identifier:UUID,body:RunAction,who=Depends(authorized)):
  require_permission(who,'broadcast.manage')
- from app.broadcast import change_run
+ from .broadcast import change_run
  try: return change_run(who['tenant_id'],identifier,body.action)
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -174,7 +174,7 @@ class BroadcastReview(BaseModel):
 @app.post('/api/broadcast/runs/{identifier}/review')
 def broadcast_review(identifier:UUID,body:BroadcastReview,who=Depends(authorized)):
  require_permission(who,'broadcast.manage')
- from app.broadcast import review_target
+ from .broadcast import review_target
  try: return review_target(who['tenant_id'],identifier,**body.model_dump())
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -186,7 +186,7 @@ class ModerationConfig(BaseModel):
 @app.post('/api/moderation/configs')
 def moderation_config(body:ModerationConfig,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.moderation import create_config
+ from .moderation import create_config
  try: return create_config(who['tenant_id'],**body.model_dump())
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -202,7 +202,7 @@ class ModerationRule(BaseModel):
 @app.post('/api/moderation/configs/{identifier}/rules')
 def moderation_rule(identifier:UUID,body:ModerationRule,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.moderation import add_rule
+ from .moderation import add_rule
  try: return add_rule(who['tenant_id'],identifier,**body.model_dump())
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -217,7 +217,7 @@ class ModerationReview(BaseModel):
 @app.post('/api/moderation/reviews/{identifier}/resolve')
 def moderation_review(identifier:UUID,body:ModerationReview,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.moderation import review
+ from .moderation import review
  try: return review(who['tenant_id'],identifier,who.get('user_id'),body.decision,body.note)
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -232,10 +232,10 @@ async def moderation_webhook(config_id:UUID,request:Request,x_telegram_bot_api_s
   if len(raw)>1024*1024: raise HTTPException(413,'消息过大')
  try:
   import json
-  from app.moderation import receive
+  from .moderation import receive
   update=json.loads(raw)
   if isinstance(update,dict) and 'callback_query' in update:
-   from app.verification import callback
+   from .verification import callback
    return callback(entry['tenant_id'],config_id,update)
   return receive(entry['tenant_id'],config_id,update)
  except (Rejected,ValueError,TypeError) as e: raise HTTPException(422,str(e) if isinstance(e,Rejected) else '消息格式错误') from None
@@ -247,7 +247,7 @@ class ModerationResolution(BaseModel):
 @app.post('/api/moderation/actions/{identifier}/resolve')
 def moderation_action_resolution(identifier:UUID,body:ModerationResolution,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.moderation import resolve_action
+ from .moderation import resolve_action
  try: return resolve_action(who['tenant_id'],identifier,who.get('user_id'),body.decision,body.evidence)
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -258,7 +258,7 @@ class VerificationReview(BaseModel):
 @app.post('/api/moderation/verification/{identifier}/review')
 def verification_review(identifier:UUID,body:VerificationReview,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.verification import review_session
+ from .verification import review_session
  try: return review_session(who['tenant_id'],identifier,who.get('user_id'),body.decision,body.evidence)
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -270,13 +270,13 @@ class NoticeResolution(BaseModel):
 @app.post('/api/moderation/notices/{identifier}/resolve')
 def notice_resolution(identifier:UUID,body:NoticeResolution,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.verification import resolve_notice
+ from .verification import resolve_notice
  try: return resolve_notice(who['tenant_id'],identifier,who.get('user_id'),**body.model_dump())
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
 @app.post('/webhooks/bots/{bot_id}')
 async def bot_gateway(bot_id:UUID,request:Request,x_telegram_bot_api_secret_token:str=Header(default='')):
- from app.bot_webhooks import ingress
+ from .bot_webhooks import ingress
  from fastapi.concurrency import run_in_threadpool
  entry=await run_in_threadpool(ingress,bot_id,x_telegram_bot_api_secret_token)
  if not entry and settings().get('mode')=='sandbox':
@@ -290,7 +290,7 @@ async def bot_gateway(bot_id:UUID,request:Request,x_telegram_bot_api_secret_toke
  try:
   import json
   from fastapi.concurrency import run_in_threadpool
-  from app.bot_gateway import dispatch
+  from .bot_gateway import dispatch
   return await run_in_threadpool(dispatch,entry['tenant_id'],bot_id,json.loads(raw))
  except DeferredIngress: raise HTTPException(503,'消息映射仍在确认，请稍后重试') from None
  except (Rejected,ValueError,TypeError) as e: raise HTTPException(422,str(e) if isinstance(e,Rejected) else '事件格式错误') from None
@@ -302,7 +302,7 @@ class AppealReview(BaseModel):
 @app.post('/api/moderation/appeals/{identifier}/review')
 def appeal_review(identifier:UUID,body:AppealReview,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.appeals import review
+ from .appeals import review
  try: return review(who['tenant_id'],identifier,who.get('user_id'),body.decision,body.note)
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -313,7 +313,7 @@ def appeals_list(who=Depends(authorized)):
 @app.get('/api/moderation/appeals/{identifier}')
 def appeal_detail(identifier:UUID,who=Depends(authorized)):
  require_permission(who,'moderation.manage')
- from app.db import unseal
+ from .db import unseal
  with transaction(who['tenant_id']) as db:
   row=db.execute('SELECT id,action_id,appeal_text,status,reviewer_note,submitted_at FROM tgmate.moderation_appeals WHERE id=%s',(identifier,)).fetchone()
   if not row: raise HTTPException(404,'未找到申诉')
@@ -331,7 +331,7 @@ def private_reply_resolution(identifier:UUID,body:NoticeResolution,who=Depends(a
   resource=db.execute("SELECT payload->>'kind' AS kind FROM tgmate.outbox_events WHERE id=%s AND event_type='bot.private_reply'",(identifier,)).fetchone()
  if not resource: raise HTTPException(404,'未找到私聊回复')
  require_permission(who,'relay.manage' if (resource['kind'] or '').startswith('relay_') else 'moderation.manage')
- from app.private_replies import review_reply
+ from .private_replies import review_reply
  try: return review_reply(who['tenant_id'],identifier,who.get('user_id'),**body.model_dump())
  except ValueError as e: raise HTTPException(422,str(e)) from None
 
@@ -351,8 +351,8 @@ class WebLogin(BaseModel):
 
 @app.post('/auth/login')
 def web_login(body:WebLogin,request:Request,response:Response):
- from app.auth import login,context,LoginRejected,LoginLimited
- from app.auth_http import origin_allowed,SESSION_COOKIE,CSRF_COOKIE
+ from .auth import login,context,LoginRejected,LoginLimited
+ from .auth_http import origin_allowed,SESSION_COOKIE,CSRF_COOKIE
  origin_allowed(request)
  try: result=login(body.email,body.workspace,body.password,request.client.host if request.client else 'unknown')
  except LoginLimited as e: raise HTTPException(429,str(e)) from None
@@ -360,7 +360,7 @@ def web_login(body:WebLogin,request:Request,response:Response):
  except RuntimeError: raise HTTPException(503,'登录模块尚未初始化') from None
  who=context(result['token'])
  if not who:
-  from app.auth import logout
+  from .auth import logout
   logout(result['token'])
   raise HTTPException(401,'账号状态已变更，请重新登录')
  secure=settings().get('mode')!='sandbox'
@@ -374,8 +374,8 @@ def web_me(who=Depends(authorized)):
 
 @app.post('/auth/logout')
 def web_logout(request:Request,response:Response):
- from app.auth import context,logout
- from app.auth_http import origin_allowed,check_csrf,SESSION_COOKIE,CSRF_COOKIE
+ from .auth import context,logout
+ from .auth_http import origin_allowed,check_csrf,SESSION_COOKIE,CSRF_COOKIE
  origin_allowed(request)
  token=request.cookies.get(SESSION_COOKIE)
  if token:
@@ -391,8 +391,8 @@ class PasswordChange(BaseModel):
 
 @app.post('/auth/password')
 def web_password(body:PasswordChange,request:Request,response:Response,who=Depends(authorized)):
- from app.auth import change_password,LoginRejected,LoginLimited
- from app.auth_http import SESSION_COOKIE,CSRF_COOKIE
+ from .auth import change_password,LoginRejected,LoginLimited
+ from .auth_http import SESSION_COOKIE,CSRF_COOKIE
  try: change_password(request.cookies.get(SESSION_COOKIE),body.old_password,body.new_password,request.client.host if request.client else 'unknown')
  except LoginLimited as e: raise HTTPException(429,str(e)) from None
  except LoginRejected as e: raise HTTPException(401,str(e)) from None
@@ -404,7 +404,7 @@ class BotRegistration(BaseModel):
 
 @app.post('/api/bots/register')
 def register_bot(body:BotRegistration,who=Depends(authorized)):
- from app.bot_credentials import register,RegistrationRejected
+ from .bot_credentials import register,RegistrationRejected
  require_permission(who,'credentials.manage')
  try: return register(who['tenant_id'],who['user_id'],body.token)
  except RegistrationRejected as e: raise HTTPException(422,str(e)) from None
@@ -412,7 +412,7 @@ def register_bot(body:BotRegistration,who=Depends(authorized)):
 
 @app.post('/api/bots/{bot_id}/credentials')
 def migrate_bot_credentials(bot_id:UUID,body:BotRegistration,who=Depends(authorized)):
- from app.bot_credentials import register,RegistrationRejected
+ from .bot_credentials import register,RegistrationRejected
  require_permission(who,'credentials.manage')
  try: return register(who['tenant_id'],who['user_id'],body.token,existing_bot_id=bot_id)
  except RegistrationRejected as e: raise HTTPException(422,str(e)) from None
@@ -420,7 +420,7 @@ def migrate_bot_credentials(bot_id:UUID,body:BotRegistration,who=Depends(authori
 
 @app.post('/api/bots/{bot_id}/webhook/prepare')
 def prepare_bot_webhook(bot_id:UUID,who=Depends(authorized)):
- from app.bot_webhooks import prepare,WebhookRejected
+ from .bot_webhooks import prepare,WebhookRejected
  try: return prepare(who['tenant_id'],who['user_id'],bot_id)
  except WebhookRejected as e: raise HTTPException(422,str(e)) from None
 
@@ -430,14 +430,14 @@ class WebhookApply(BaseModel):
 
 @app.post('/api/bots/{bot_id}/webhook/apply')
 def apply_bot_webhook(bot_id:UUID,body:WebhookApply,who=Depends(authorized)):
- from app.bot_webhooks import apply,WebhookRejected
+ from .bot_webhooks import apply,WebhookRejected
  try: return apply(who['tenant_id'],who['user_id'],bot_id,allow_replace=body.allow_replace,retry_uncertain=body.retry_uncertain)
  except WebhookRejected as e: raise HTTPException(422,str(e)) from None
 
 
 @app.post('/api/bots/{bot_id}/webhook/inspect')
 def inspect_bot_webhook(bot_id:UUID,who=Depends(authorized)):
- from app.bot_webhooks import reconcile,WebhookRejected
+ from .bot_webhooks import reconcile,WebhookRejected
  try: return reconcile(who['tenant_id'],bot_id)
  except WebhookRejected as e: raise HTTPException(422,str(e)) from None
 
@@ -448,7 +448,7 @@ class ModerationState(BaseModel):
 
 @app.post('/api/moderation/configs/{identifier}/state')
 def moderation_state(identifier:UUID,body:ModerationState,who=Depends(authorized)):
- from app.moderation_control import set_enabled
+ from .moderation_control import set_enabled
  try: return set_enabled(who['tenant_id'],identifier,who['user_id'],**body.model_dump())
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -460,7 +460,7 @@ def moderation_config_list(who=Depends(authorized)):
 
 @app.post('/api/relay/configs/{identifier}/operator/challenge')
 def relay_operator_challenge(identifier:UUID,who=Depends(authorized)):
- from app.relay_operator import challenge
+ from .relay_operator import challenge
  try: return challenge(who['tenant_id'],identifier,who['user_id'])
  except Rejected as e: raise HTTPException(422,str(e)) from None
 
@@ -473,8 +473,8 @@ def relay_privacy_status(identifier:UUID,who=Depends(authorized)):
 
 @app.post('/api/relay/conversations/{identifier}/privacy/review')
 def relay_privacy_review(identifier:UUID,body:NoticeResolution,who=Depends(authorized)):
- from app.relay_privacy import VERSION
- from app.private_replies import review_reply
+ from .relay_privacy import VERSION
+ from .private_replies import review_reply
  with transaction(who['tenant_id']) as db:
   row=db.execute('SELECT outbox_id FROM tgmate.relay_privacy_notices WHERE conversation_id=%s AND version=%s FOR UPDATE',(identifier,VERSION)).fetchone()
   if not row or not row['outbox_id']: raise HTTPException(404,'未找到待处理告知')
@@ -486,6 +486,6 @@ class PrivacyRetry(BaseModel):
 
 @app.post('/api/relay/conversations/{identifier}/privacy/retry')
 def relay_privacy_retry(identifier:UUID,body:PrivacyRetry,who=Depends(authorized)):
- from app.relay_privacy import retry
+ from .relay_privacy import retry
  try: return retry(who['tenant_id'],identifier,who['user_id'],body.evidence)
  except Rejected as e: raise HTTPException(422,str(e)) from None

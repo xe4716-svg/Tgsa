@@ -35,6 +35,29 @@
 - 在隔离新库恢复后核对两套迁移账本、RLS、关键业务计数与财务余额；同时验证独立保存的 KMS/Session 密钥。未通过不得切换生产。
 - 本轮未取得可用的目标服务器连接配置；Docker 可运行性由远端 CI 核验，目标服务器还需单独验收。
 
+## 多账号网关与独立 Bot 进程
+
+- root 迁移现在为 12 份，业务迁移为 14 份；以脚本动态文件清单/账本为准，不硬编码旧数量。先完成正常 migrate/bootstrap。
+- 多账号只读入口：`python -m app.workers.gateway --tenant <ROOT_TENANT_UUID>`；可重复 --tenant，默认总容量 20、每租户 5。或显式 --from-env 读取私有 GATEWAY_TENANT_IDS。不会发现/扫描未分配租户，不会自动启用路由。
+- 网站授权用户通过 GET/POST `/api/v1/telegram/accounts/{account_id}/gateway` 读取/改变期望状态。POST 包含 enabled 布尔和 expected_generation 整数；新路由版本为 0，冲突后必须重新读取。重复启用也生成新版本并重新交接，不作为自动重试按钮。API 返回的 lease_expires_at 不是远端连接已经关闭的证明。
+- 连接失败暂停持久路由；人工核对原因及 Telegram 等待后，才可显式重新启用。断开不明还需终止/检查旧进程和恢复 PAUSED 账号；不要给该进程配置自动重启。
+- Bot 角色初始化：在管理员 PG* 私有环境设置 BOT_WORKER_PASSWORD（至少 24 字符），执行 `python scripts/configure_bot_worker.py --worker <WORKER_UUID>`。角色固定为 tgs_bot_worker；既有密码不会静默修改，明确 --rotate-password 才轮换。这里不会登记或替换远端 Webhook。
+- 保存已有业务 Fernet 密钥至独立 Bot 私有配置 BUSINESS_VAULT_KEY，禁止为了通过启动而更换现有密钥。BOT_WORKER_DATABASE_URL 必须使用上述专用角色；BOT_WORKER_ID 对应已注册 healthy 的 Bot worker；BOT_TENANT_IDS 是现有映射中的业务租户 UUID 白名单。
+- Bot HTTP 与原队列同进程：`uvicorn app.bot_main:app --host 127.0.0.1 --port 8001`。只开放 `/webhooks/bots/{bot_id}` 及就绪检查，由外部 HTTPS 代理转发；不挂载原 standalone 网站登录，也不主动应用 Webhook。已有 prepared/active Webhook 迁移需核对域名、URL 和密钥，保留待处理更新。
+- 仅运行队列时使用 `python -m app.workers.bot --tenant <BUSINESS_TENANT_UUID> --worker <WORKER_UUID> --live`。它使用原 Bot 业务队列；不会领取协议号群发，未确认的远端发送仍按原 unknown/manual review 处理。
+- 可选 Compose 覆盖文件 docker-compose.workers.yml 使用独立 .env.bot.runtime 和 .env.mtproto.runtime，示例已提供。显式组合两个 Compose 文件并启动 bot/mtproto 前，先配置角色、白名单和原有密钥；不能把示例空值当作部署成功。基础 Compose 不自动启动外部 Telegram 连接。
+- 仍保留商业 Worker 独立入口。API 登录在迁出内存协调器前继续只运行一个实例。完整三进程业务收敛仍未验收。
+
+## 认证加密备份
+
+`python scripts/database_backup.py backup /private/path/database.backup.enc --key-file /private/keys/backup-key`
+
+`python scripts/database_backup.py restore /private/path/database.backup.enc NEW_DATABASE --key-file /private/keys/backup-key`
+
+key-file 必须是权限 0600/0400 的普通文件，正好 32 个随机字节；拒绝符号链接。它由管理员通过密钥托管系统取得并独立保管，不放入仓库、镜像或归档。原有 Session KEK、业务 Fernet 密钥及其他外部密钥也须独立备份；加密数据库归档不能替代这些密钥。
+
+备份以流式 AES-256-GCM 写出，出错清理临时文件，拒绝覆盖。恢复先完整认证再创建新库；pg_restore 使用私有临时明文文件和单事务，临时文件关闭即删除。生产恢复位置应使用私有加密临时卷。新库失败保留供排查，源库和已有目标不被覆盖。完整恢复后再验证密钥解密、RLS、两套账本、财务对账和实际业务，再决定是否切换。该工具不自行实现 KMS、异地传输、保留策略或生产切换。
+
 
 ## 显式账号的只读 MTProto 验证入口
 

@@ -4,7 +4,7 @@ from datetime import datetime,timedelta,timezone
 from contextlib import contextmanager
 import psycopg
 from psycopg.rows import dict_row
-from app.db import settings
+from .db import settings
 
 class LoginRejected(ValueError): pass
 class LoginLimited(ValueError): pass
@@ -94,7 +94,7 @@ def change_password(token,old_password,new_password,ip):
    db.execute('SELECT tgmate.auth_mark_success(%s)',(attempt,))
  except psycopg.errors.RaiseException: raise LoginRejected('账号状态已变更，请重新登录') from None
  # Remove an obsolete local initial password only for the original demo identity.
- from app.db import ROOT
+ from .db import ROOT
  import json
  demo=ROOT/'.local/demo.json'; initial=ROOT/'.local/owner_login.json'
  if demo.exists() and initial.exists() and json.loads(demo.read_text()).get('user')==str(record['user_id']):

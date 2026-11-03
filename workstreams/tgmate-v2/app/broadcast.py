@@ -2,8 +2,8 @@
 import hashlib,json,uuid
 from datetime import datetime,timezone
 from psycopg.types.json import Jsonb
-from app.db import transaction
-from app.relay import Rejected
+from .db import transaction
+from .relay import Rejected
 
 def create_plan(tenant,request_key,module,text,targets,robot=None,binding=None,session=None,scheduled_at=None):
  if module not in ('bot_broadcast','account_broadcast'): raise Rejected('群发通道无效')
@@ -90,7 +90,7 @@ def change_run(tenant,run_id,action):
   db.execute('UPDATE tgmate.broadcast_task_runs SET status=%s WHERE id=%s',(status,run_id))
   db.execute('UPDATE tgmate.task_registry SET status=%s WHERE id=%s',(status,run['task_id']))
   if action=='cancel':
-   from app.quota import settle
+   from .quota import settle
    pending=db.execute("SELECT payload FROM tgmate.outbox_events WHERE aggregate_type='broadcast_run' AND aggregate_id=%s AND status IN ('pending','failed') FOR UPDATE",(run_id,)).fetchall()
    for job in pending:
     if job['payload'].get('reservation_id'): settle(db,tenant,run['task_id'],False,job['payload']['reservation_id'])
@@ -101,7 +101,7 @@ def change_run(tenant,run_id,action):
    db.execute("UPDATE tgmate.broadcast_run_targets SET status='skipped' WHERE run_id=%s AND status IN ('pending','ready')",(run_id,))
   db.execute("INSERT INTO tgmate.audit_logs(tenant_id,action,resource_type,resource_id) VALUES(%s,%s,'broadcast_run',%s)",(tenant,f'broadcast.{action}',run_id))
   if action=='resume':
-   from app.broadcast_worker import complete_run
+   from .broadcast_worker import complete_run
    complete_run(db,run)
    status=db.execute('SELECT status FROM tgmate.broadcast_task_runs WHERE id=%s',(run_id,)).fetchone()['status']
   return {'run_id':str(run_id),'status':status,'inflight_may_finish':True}
@@ -122,7 +122,7 @@ def review_target(tenant,run_id,destination_id,action,evidence,remote_message_id
   if action=='confirm_sent' and (type(remote_message_id) is not int or remote_message_id<=0): raise Rejected('需要远端消息编号')
   if delivery and delivery['status']=='succeeded': raise Rejected('已送达消息不能再次处理')
   data=dict(job['payload'])
-  from app.quota import settle
+  from .quota import settle
   if action!='retry' and data.get('reservation_id'): settle(db,tenant,run['task_id'],action=='confirm_sent',data['reservation_id'])
   if action=='retry':
    if data.get('reservation_id'): settle(db,tenant,run['task_id'],False,data['reservation_id']); data.pop('reservation_id')

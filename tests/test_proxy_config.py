@@ -33,10 +33,10 @@ def test_proxy_requires_verified_state():
         build_proxy(profile)
 
 
-def test_http_connect_is_not_silently_enabled():
+def test_http_connect_uses_explicit_async_transport():
     profile = {**VERIFIED_SOCKS, "proxy_type": "HTTP_CONNECT"}
-    with pytest.raises(NotImplementedError):
-        build_proxy(profile)
+    proxy,connection = build_proxy(profile)
+    assert proxy['proxy_type']=='http' and proxy['rdns'] is True and connection is None
 
 
 def test_connection_choice_must_be_explicit():

@@ -1,7 +1,7 @@
 from pathlib import Path
 import re,json,hashlib
 from pglast import parse_sql,parse_plpgsql
-files=sorted(Path('source_001_003').glob('*.sql'))+[Path('tgmate_v2_004_bidirectional.sql'),Path('004a_relay_runtime.sql'),Path('004b_moderation_control_hardening.sql'),Path('004c_web_auth.sql'),Path('004d_bot_credentials.sql'),Path('004e_bot_webhooks.sql'),Path('004f_relay_operator_auth.sql'),Path('004g_operator_identity_invalidation.sql'),Path('004h_relay_privacy_notice.sql')]
+files=sorted(Path('source_001_003').glob('*.sql'))+[Path('tgmate_v2_004_bidirectional.sql'),Path('004a_relay_runtime.sql'),Path('004b_moderation_control_hardening.sql'),Path('004c_web_auth.sql'),Path('004d_bot_credentials.sql'),Path('004e_bot_webhooks.sql'),Path('004f_relay_operator_auth.sql'),Path('004g_operator_identity_invalidation.sql'),Path('004h_relay_privacy_notice.sql'),Path('004i_telegram_ai_safety.sql'),Path('004j_bot_runtime_limits.sql')]
 results=[]
 known=set()
 for p in files:

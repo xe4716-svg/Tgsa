@@ -1,0 +1,9 @@
+{
+  "scope": "disposable PostgreSQL queue concurrency; synthetic adapter; no Telegram requests",
+  "postgresql": "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+  "jobs": 40,
+  "threads": 8,
+  "unique_sends": 40,
+  "seconds": 0.4875,
+  "production_capacity_claim": false
+}

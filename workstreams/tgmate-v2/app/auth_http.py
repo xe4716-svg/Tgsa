@@ -2,8 +2,8 @@
 import hmac,hashlib
 from urllib.parse import urlsplit
 from fastapi import HTTPException,Request
-from app.db import settings
-from app.auth import context,digest
+from .db import settings
+from .auth import context,digest
 
 SESSION_COOKIE='tgmate_session'; CSRF_COOKIE='tgmate_csrf'
 READ_PERMISSIONS=['relay.read','broadcast.read','moderation.read','analytics.read','tenant.read']

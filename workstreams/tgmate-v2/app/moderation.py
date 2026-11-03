@@ -3,8 +3,8 @@ import hashlib,json,uuid
 from datetime import datetime,timezone
 import regex
 from psycopg.types.json import Jsonb
-from app.db import transaction,seal,unseal
-from app.relay import Rejected
+from .db import transaction,seal,unseal
+from .relay import Rejected
 
 SUPPORTED_RULES={'keyword','regex','link','invite_link','flood','duplicate','mention_spam'}
 
@@ -189,7 +189,7 @@ def resolve_action(tenant,action_id,user_id,decision,evidence):
   unknown=action['result'].get('unknown_outcome') is True
   if unknown and decision in ('retry','cancel'): raise Rejected('结果不明必须先核对成功或失败')
   if decision.startswith('confirm_') and not unknown: raise Rejected('该动作没有待核对的远端结果')
-  from app.quota import settle
+  from .quota import settle
   if job['payload'].get('reservation_id'): settle(db,tenant,job['payload']['task_id'],decision=='confirm_succeeded',job['payload']['reservation_id'])
   if decision=='retry':
    if action['status'] not in ('failed','blocked','manual_review'): raise Rejected('当前动作不能重试')

@@ -28,7 +28,10 @@ def main():
                   user=os.environ['PGUSER'], password=os.environ['PGPASSWORD'], dbname='postgres')
     name = 'tgs_v2_ci_' + uuid4().hex[:12]
     source = ROOT / 'workstreams/tgmate-v2'
-    report = ROOT / 'docs/validation/work-v2.xml'
+    report = Path(os.environ.get('TGMATE_V2_REPORT',ROOT / 'docs/validation/work-v2.xml'))
+    if not report.is_absolute():
+        report = ROOT / report
+    report.parent.mkdir(parents=True,exist_ok=True)
     env = dict(os.environ, PGDATABASE=name, APP_DB_PASSWORD=secrets.token_urlsafe(32))
     # Refuse existing application/auth roles rather than changing their passwords.
     with psycopg.connect(**config, autocommit=True) as admin:

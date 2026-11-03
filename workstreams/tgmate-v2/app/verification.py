@@ -2,9 +2,9 @@
 import hashlib,secrets,uuid
 from datetime import datetime,timezone
 from psycopg.types.json import Jsonb
-from app.db import transaction,seal,unseal
-from app.relay import Rejected
-from app.moderation import queue_action
+from .db import transaction,seal,unseal
+from .relay import Rejected
+from .moderation import queue_action
 
 
 def enqueue(db,tenant,config,kind,aggregate,event_id):
@@ -76,7 +76,7 @@ def callback(tenant,config_id,update):
   if prefix!='v' or not nonce: raise ValueError()
  except (ValueError,TypeError): raise Rejected('验证按钮无效') from None
  with transaction(tenant) as db:
-  from app.moderation_worker import config_for
+  from .moderation_worker import config_for
   c=config_for(db,config_id)
   if not c: raise Rejected('群组不存在')
   session=db.execute('SELECT * FROM tgmate.moderation_verification_sessions WHERE id=%s AND group_config_id=%s FOR UPDATE',(identifier,config_id)).fetchone()
@@ -112,7 +112,7 @@ def callback(tenant,config_id,update):
 def expire_sessions(tenant):
  count=0
  with transaction(tenant) as db:
-  from app.moderation_worker import config_for
+  from .moderation_worker import config_for
   candidates=db.execute("SELECT id,group_config_id FROM tgmate.moderation_verification_sessions WHERE status='pending' AND expires_at<=now() LIMIT 100").fetchall()
   for candidate in candidates:
    config=config_for(db,candidate['group_config_id'])
@@ -164,7 +164,7 @@ def review_session(tenant,identifier,user_id,decision,evidence):
   if not user_id or not db.execute("SELECT user_id FROM tgmate.tenant_members WHERE user_id=%s AND status='active'",(user_id,)).fetchone(): raise Rejected('审核人身份无效')
   found=db.execute('SELECT group_config_id FROM tgmate.moderation_verification_sessions WHERE id=%s',(identifier,)).fetchone()
   if not found: raise Rejected('验证会话不存在')
-  from app.moderation_worker import config_for
+  from .moderation_worker import config_for
   c=config_for(db,found['group_config_id'])
   session=db.execute('SELECT * FROM tgmate.moderation_verification_sessions WHERE id=%s FOR UPDATE',(identifier,)).fetchone()
   if session['status'] not in ('pending','manual_review'): raise Rejected('该验证已结束')
@@ -187,9 +187,9 @@ def resolve_notice(tenant,identifier,user_id,decision,evidence,remote_message_id
   if not unknown and decision.startswith('confirm_'): raise Rejected('该投递没有未决远端结果')
   if decision=='confirm_sent' and (type(remote_message_id) is not int or remote_message_id<=0): raise Rejected('需要远端消息编号')
   event=db.execute('SELECT * FROM tgmate.moderation_message_events WHERE id=%s',(job['payload']['event_id'],)).fetchone()
-  from app.moderation_worker import config_for
+  from .moderation_worker import config_for
   c=config_for(db,event['group_config_id'])
-  from app.quota import settle
+  from .quota import settle
   if job['payload'].get('reservation_id'): settle(db,tenant,job['payload']['task_id'],decision=='confirm_sent',job['payload']['reservation_id'])
   if decision=='retry':
    if job['event_type']=='moderation.challenge':

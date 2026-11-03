@@ -1,21 +1,21 @@
 """One-shot worker; lease token fences completions. Default adapter never uses network."""
 import uuid
-from app.db import transaction,unseal,settings
-from app.quota import settle
+from .db import transaction,unseal,settings
+from .quota import settle
 
 class UnknownSend(Exception): pass
 class RetryLater(Exception):
- def __init__(self,seconds): self.seconds=max(1,min(int(seconds),86400))
+ def __init__(self,seconds): self.seconds=max(1,int(seconds))
 class PermanentFailure(Exception): pass
 
 class MockTelegram:
  def send(self,target,payload,config): return int(uuid.uuid4().int % 2_000_000_000)+1
 
 class Telegram:
- def __init__(self,client=None): self.client=client
+ def __init__(self,client=None,token_resolver=None,rate_limiter=None): self.client=client; self.token_resolver=token_resolver; self.rate_limiter=rate_limiter
  def send(self,target,payload,config):
-  from app.telegram_adapters import BotBroadcast
-  result=BotBroadcast(self.client).call(config,'copyMessage',{'chat_id':target,'from_chat_id':payload['source_chat_id'],'message_id':payload['source_message_id']})
+  from .telegram_adapters import BotBroadcast
+  result=BotBroadcast(self.client,self.token_resolver,self.rate_limiter).call(config,'copyMessage',{'chat_id':target,'from_chat_id':payload['source_chat_id'],'message_id':payload['source_message_id']})
   if not isinstance(result,dict) or type(result.get('message_id')) is not int or result['message_id']<=0: raise UnknownSend()
   return result['message_id']
 
@@ -46,10 +46,10 @@ def run_once(tenant,worker_id,adapter=None):
    db.execute("UPDATE tgmate.task_registry SET status='cancelled' WHERE id=%s",(x['task_id'],))
    settle(db,tenant,x['task_id'],False)
    return {'status':'cancelled'}
-  from app.relay_operator import authorized
+  from .relay_operator import authorized
   if not authorized(db,c): return {'status':'waiting_for_operator_authorization'}
   if op['direction']=='to_operator':
-   from app.relay_privacy import ready
+   from .relay_privacy import ready
    if not ready(db,tenant,c,v):
     db.execute("UPDATE tgmate.outbox_events SET available_at=now()+interval '2 seconds' WHERE id=%s",(x['outbox_id'],))
     return {'status':'waiting_for_privacy_notice'}
@@ -72,10 +72,10 @@ def run_once(tenant,worker_id,adapter=None):
  except PermanentFailure: status='failed'
  except Exception: status='uncertain'
  with transaction(tenant) as db:
-  from app.relay_operator import authorized
+  from .relay_operator import authorized
   if not authorized(db,c): return {'status':'waiting_for_operator_authorization'}
   if op['direction']=='to_operator':
-   from app.relay_privacy import ready
+   from .relay_privacy import ready
    if not ready(db,tenant,c,v):
     db.execute("UPDATE tgmate.outbox_events SET available_at=now()+interval '2 seconds' WHERE id=%s",(x['outbox_id'],))
     return {'status':'waiting_for_privacy_notice'}

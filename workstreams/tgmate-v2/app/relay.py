@@ -1,8 +1,8 @@
 """Durable customer-to-operator relay. Webhook identity is verified by the API."""
 import hashlib,json,uuid
 from psycopg.types.json import Jsonb
-from app.db import transaction,seal
-from app.quota import reserve,QuotaExceeded
+from .db import transaction,seal
+from .quota import reserve,QuotaExceeded
 
 class Rejected(ValueError): pass
 
@@ -10,7 +10,7 @@ def receive(tenant,config_id,update):
  with transaction(tenant) as db:
   c=db.execute('SELECT * FROM tgmate.relay_configs WHERE id=%s FOR UPDATE',(config_id,)).fetchone()
   if not c or c['status']!='active': raise Rejected('入口未启用')
-  from app.relay_operator import consume,authorized
+  from .relay_operator import consume,authorized
   control=consume(tenant,c['telegram_bot_id'],update)
   if control is not None: return control
   if not authorized(db,c): raise Rejected('客服运营者尚未完成Bot接收授权')
@@ -46,7 +46,7 @@ def receive(tenant,config_id,update):
    # Private contact is the initiation evidence; no two-person pairing invitation.
    v=db.execute("INSERT INTO tgmate.relay_conversations(tenant_id,config_id,customer_user_id,initiated_at,privacy_notice_version) VALUES(%s,%s,%s,now(),'v1') ON CONFLICT(tenant_id,config_id,customer_user_id) DO UPDATE SET customer_user_id=EXCLUDED.customer_user_id RETURNING *",(tenant,config_id,user)).fetchone()
    if v['status']!='open': raise Rejected('会话已暂停或屏蔽')
-   from app.relay_privacy import ensure
+   from .relay_privacy import ensure
    ensure(db,tenant,c,v)
    v_id=v['id']; v_gen=v['generation']; target=c['operator_user_id']; direction='to_operator'; reply_id=None
   # No raw update stored in inbox; content is encrypted with a retention deadline.

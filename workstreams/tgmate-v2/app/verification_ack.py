@@ -1,10 +1,10 @@
 """Best-effort ephemeral callback acknowledgement; never controls verification state."""
 import uuid
 from psycopg.types.json import Jsonb
-from app.db import transaction,unseal
-from app.jobs import acquire,valid,release
-from app.moderation_worker import config_for
-from app.worker import RetryLater,PermanentFailure
+from .db import transaction,unseal
+from .jobs import acquire,valid,release
+from .moderation_worker import config_for
+from .worker import RetryLater,PermanentFailure
 
 
 def run_once(tenant,worker_id,adapter):

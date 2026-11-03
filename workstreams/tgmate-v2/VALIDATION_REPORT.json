@@ -1,7 +1,7 @@
 {
   "checks": [
     {
-      "file": "source_001_003\\001_core_foundation.sql",
+      "file": "source_001_003/001_core_foundation.sql",
       "sha256": "b2d4e422e810aaeef41cc5e08907f9492bfd8b8f23bc9bc07f9ba219380264d8",
       "sql_statements_parsed": 76,
       "plpgsql_functions_parsed": 4,
@@ -9,7 +9,7 @@
       "status": "PASS"
     },
     {
-      "file": "source_001_003\\002_broadcast_channels.sql",
+      "file": "source_001_003/002_broadcast_channels.sql",
       "sha256": "c96ba56df9d249c0c95ee43e2e8e88457f895443b3cc66676d9fe475ebade11e",
       "sql_statements_parsed": 52,
       "plpgsql_functions_parsed": 8,
@@ -17,7 +17,7 @@
       "status": "PASS"
     },
     {
-      "file": "source_001_003\\003_group_moderation.sql",
+      "file": "source_001_003/003_group_moderation.sql",
       "sha256": "4706391c04014cff63b4a13b237e4ff12a3b117d2a9b9cc6162bc62817af5e76",
       "sql_statements_parsed": 49,
       "plpgsql_functions_parsed": 4,
@@ -91,6 +91,22 @@
     {
       "file": "004h_relay_privacy_notice.sql",
       "sha256": "7b54e37fef7ae63697a4a38af9f08ba2b36897df3d6559ab9cb30e639e52bbb8",
+      "sql_statements_parsed": 6,
+      "plpgsql_functions_parsed": 0,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004i_telegram_ai_safety.sql",
+      "sha256": "10200d9093c1f0ddd41468b0d4078601fb1263340b99345c59e8768187cb0bc5",
+      "sql_statements_parsed": 11,
+      "plpgsql_functions_parsed": 1,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004j_bot_runtime_limits.sql",
+      "sha256": "dec6998b98c699ae3fcc391c96312ad6b714274b1c83c51a27245aed5464b65a",
       "sql_statements_parsed": 6,
       "plpgsql_functions_parsed": 0,
       "missing_referenced_tables": [],

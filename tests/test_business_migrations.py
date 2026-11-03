@@ -82,7 +82,7 @@ def test_real_business_migration_lifecycle(tmp_path):
             assert run('migrate_business.py', names[0]) == 0, 'Initial business migration failed'
             assert run('migrate_business.py', names[0]) == 0, 'Repeat migration failed'
             with psycopg.connect(**dict(config, dbname=names[0]), autocommit=True) as db:
-                assert db.execute('SELECT count(*) FROM public.schema_migrations').fetchone()[0] == 10
+                assert db.execute('SELECT count(*) FROM public.schema_migrations').fetchone()[0] == len(list((root/'migrations').glob('*.sql')))
                 ledger = db.execute('SELECT name,sha256 FROM public.business_schema_migrations ORDER BY name').fetchall()
                 expected = [(f'{i:03d}_{Path(n).name}', hashlib.sha256((ROOT/n).read_bytes()).hexdigest()) for i,n in enumerate(FILES,1)]
                 assert ledger == expected
@@ -103,7 +103,7 @@ def test_real_business_migration_lifecycle(tmp_path):
             assert run('bootstrap_combined.py', names[4]) == 0, 'Combined initialization failed'
             assert run('bootstrap_combined.py', names[4]) == 0, 'Combined repeat failed'
             with psycopg.connect(**dict(config,dbname=names[4]),autocommit=True) as db:
-                assert db.execute('SELECT count(*) FROM public.schema_migrations').fetchone()[0] == 10
+                assert db.execute('SELECT count(*) FROM public.schema_migrations').fetchone()[0] == len(list((root/'migrations').glob('*.sql')))
                 assert db.execute('SELECT count(*) FROM public.business_schema_migrations').fetchone()[0] == len(FILES)
                 assert db.execute("SELECT ai_mode FROM tgmate.moderation_platform_defaults").fetchone()[0] == 'off'
                 with pytest.raises(psycopg.errors.CheckViolation):
@@ -122,7 +122,7 @@ def test_real_business_migration_lifecycle(tmp_path):
                 with db.transaction():
                     db.execute('SET LOCAL ROLE tgs_runtime')
                     assert db.execute('SELECT id,status FROM tgmate.relay_conversations').fetchall() == []
-            evidence.update(passed=True, business_ledger_count=len(FILES), root_ledger_count=10,
+            evidence.update(passed=True, business_ledger_count=len(FILES), root_ledger_count=len(list((root/'migrations').glob('*.sql'))),
                 checks=['first','repeat','original SQL hashes','drift rejection','missing root rejection',
                         'untracked schema rejection','failed file rollback','resume after failure',
                         'combined bootstrap first/repeat','sensitive columns denied','metadata columns readable',

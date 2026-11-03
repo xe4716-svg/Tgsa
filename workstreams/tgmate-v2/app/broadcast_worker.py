@@ -1,9 +1,9 @@
 """Durable one-target broadcast worker; fresh preflight, fenced completion, no rotation."""
 import uuid
 from psycopg.types.json import Jsonb
-from app.db import transaction
-from app.quota import reserve,settle,QuotaExceeded
-from app.worker import UnknownSend,RetryLater,PermanentFailure
+from .db import transaction
+from .quota import reserve,settle,QuotaExceeded
+from .worker import UnknownSend,RetryLater,PermanentFailure
 
 
 def context(db,run):
@@ -26,10 +26,11 @@ def complete_run(db,run):
  db.execute("UPDATE tgmate.broadcast_task_runs SET status=%s,finished_at=now() WHERE id=%s AND status NOT IN ('cancelled','paused')",(status,run['id']))
  db.execute("UPDATE tgmate.task_registry SET status=%s,finished_at=now() WHERE id=%s AND status NOT IN ('cancelled','paused')",(status,run['task_id']))
 
-def run_once(tenant,worker_id,adapter):
+def run_once(tenant,worker_id,adapter,*,business_module=None):
+ if business_module not in (None,'bot_broadcast','account_broadcast'): raise ValueError('Invalid broadcast module')
  token=uuid.uuid4()
  with transaction(tenant) as db:
-  expired=db.execute("SELECT * FROM tgmate.outbox_events WHERE event_type='broadcast.dispatch' AND status='publishing' AND locked_until<now() FOR UPDATE SKIP LOCKED").fetchall()
+  expired=db.execute("SELECT o.* FROM tgmate.outbox_events o JOIN tgmate.broadcast_task_runs r ON r.tenant_id=o.tenant_id AND r.id=o.aggregate_id WHERE o.event_type='broadcast.dispatch' AND o.status='publishing' AND o.locked_until<now() AND (%s::text IS NULL OR r.business_module=%s) FOR UPDATE OF o SKIP LOCKED",(business_module,business_module)).fetchall()
   for old in expired:
    run=db.execute('SELECT * FROM tgmate.broadcast_task_runs WHERE id=%s FOR UPDATE',(old['aggregate_id'],)).fetchone()
    delivery=old['payload'].get('delivery_id')
@@ -44,7 +45,7 @@ def run_once(tenant,worker_id,adapter):
    else:
     db.execute("UPDATE tgmate.outbox_events SET status='failed',available_at=now(),locked_until=NULL WHERE id=%s",(old['id'],))
     db.execute("UPDATE tgmate.broadcast_run_targets SET status='pending' WHERE run_id=%s AND destination_id=%s",(run['id'],old['payload']['destination_id']))
-  job=db.execute("SELECT o.* FROM tgmate.outbox_events o JOIN tgmate.broadcast_task_runs r ON r.tenant_id=o.tenant_id AND r.id=o.aggregate_id WHERE o.event_type='broadcast.dispatch' AND o.status IN ('pending','failed') AND o.available_at<=now() AND r.status IN ('queued','running') ORDER BY o.created_at FOR UPDATE OF r,o SKIP LOCKED LIMIT 1").fetchone()
+  job=db.execute("SELECT o.* FROM tgmate.outbox_events o JOIN tgmate.broadcast_task_runs r ON r.tenant_id=o.tenant_id AND r.id=o.aggregate_id WHERE o.event_type='broadcast.dispatch' AND o.status IN ('pending','failed') AND o.available_at<=now() AND r.status IN ('queued','running') AND (%s::text IS NULL OR r.business_module=%s) ORDER BY o.created_at FOR UPDATE OF r,o SKIP LOCKED LIMIT 1",(business_module,business_module)).fetchone()
   if not job: return {'status':'idle'}
   run=db.execute('SELECT * FROM tgmate.broadcast_task_runs WHERE id=%s FOR UPDATE',(job['aggregate_id'],)).fetchone()
   lease=db.execute("INSERT INTO tgmate.task_leases(tenant_id,task_id,worker_id,lease_token,lease_until) VALUES(%s,%s,%s,%s,now()+interval '60 seconds') ON CONFLICT(tenant_id,task_id) DO UPDATE SET worker_id=EXCLUDED.worker_id,lease_token=EXCLUDED.lease_token,leased_at=now(),lease_until=EXCLUDED.lease_until WHERE tgmate.task_leases.lease_until<now() RETURNING lease_token",(tenant,run['task_id'],worker_id,token)).fetchone()

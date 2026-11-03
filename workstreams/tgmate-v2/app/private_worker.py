@@ -1,9 +1,9 @@
 """Private Bot reply worker. Payloads expire and unknown sends require human review."""
 import uuid
 from psycopg.types.json import Jsonb
-from app.db import transaction,unseal
-from app.jobs import acquire,valid,release
-from app.worker import RetryLater,PermanentFailure,UnknownSend
+from .db import transaction,unseal
+from .jobs import acquire,valid,release
+from .worker import RetryLater,PermanentFailure,UnknownSend
 
 
 def run_once(tenant,worker_id,adapter):

@@ -163,3 +163,24 @@ async def test_stop_interrupts_pending_connect():
 def test_material_repr_cannot_expose_session_or_proxy_password():
     material=AccountMaterial(123,'PROXY','digest','secret-session',{'password':'secret-password'})
     assert 'secret-session' not in repr(material) and 'secret-password' not in repr(material)
+
+
+@pytest.mark.anyio
+async def test_stale_route_is_refused_before_client_creation():
+    runner,leases,client,_=await setup()
+    leases.conn.fetchval=AsyncMock(return_value=False)
+    result=await runner.run(leases.lease.tenant_id,leases.lease.account_id,asyncio.Event(),route_generation=7)
+    assert result.reason=='OWNERSHIP_LOST'
+    assert 'create' not in leases.calls
+    client.connect.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_disabling_current_route_disconnects_the_ready_client():
+    runner,leases,client,_=await setup();ready=asyncio.Event()
+    leases.conn.fetchval=AsyncMock(return_value=True)
+    task=asyncio.create_task(runner.run(leases.lease.tenant_id,leases.lease.account_id,asyncio.Event(),ready=ready,route_generation=7))
+    await asyncio.wait_for(ready.wait(),1)
+    leases.conn.fetchval.return_value=False
+    assert (await asyncio.wait_for(task,1)).reason=='MATERIAL_UNAVAILABLE'
+    client.disconnect.assert_awaited_once()

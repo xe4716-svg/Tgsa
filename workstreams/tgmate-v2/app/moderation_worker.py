@@ -1,11 +1,11 @@
 """003 durable evaluation/action worker. Exemptions and permissions are checked live."""
 import uuid
 from psycopg.types.json import Jsonb
-from app.db import transaction,unseal
-from app.jobs import acquire,valid,release
-from app.quota import reserve,settle,QuotaExceeded
-from app.worker import RetryLater,PermanentFailure,UnknownSend
-from app.moderation import evaluate,exempt,prepare_join
+from .db import transaction,unseal
+from .jobs import acquire,valid,release
+from .quota import reserve,settle,QuotaExceeded
+from .worker import RetryLater,PermanentFailure,UnknownSend
+from .moderation import evaluate,exempt,prepare_join
 
 
 def config_for(db,identifier):
@@ -95,7 +95,7 @@ def run_once(tenant,worker_id,adapter):
    db.execute("UPDATE tgmate.outbox_events SET status='published',locked_until=NULL WHERE id=%s",(job['id'],))
    db.execute("UPDATE tgmate.task_registry SET status='cancelled' WHERE id=%s",(task,))
    release(db,task,token); return {'status':'exempt'}
-  from app.verification import action_context
+  from .verification import action_context
   directive,action=action_context(db,action,event,role)
   if directive!='execute':
    if directive=='defer':

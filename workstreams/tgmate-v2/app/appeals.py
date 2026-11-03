@@ -1,10 +1,10 @@
 """Identity-bound appeals, encrypted reasons and audited compensation requests."""
 import hashlib,json,uuid
 from psycopg.types.json import Jsonb
-from app.db import transaction,seal
-from app.relay import Rejected
-from app.moderation import queue_action
-from app.private_replies import enqueue
+from .db import transaction,seal
+from .relay import Rejected
+from .moderation import queue_action
+from .private_replies import enqueue
 
 LABELS={'ban':'封禁','restrict':'限制发言','delete_message':'删除消息','warn':'警告'}
 
@@ -40,7 +40,7 @@ def receive(tenant,bot_id,update):
     if isinstance(reply,dict):
      pending=db.execute("SELECT o.status,o.payload FROM tgmate.outbox_events o WHERE o.event_type='bot.private_reply' AND o.aggregate_id=%s AND o.payload->>'kind'='appeal_prompt' AND (o.payload->>'target_user_id')::bigint=%s AND (o.status='publishing' OR o.payload->>'unknown_outcome'='true') AND o.created_at>now()-interval '1 day' ORDER BY o.created_at DESC LIMIT 1",(bot_id,user)).fetchone()
      if pending and pending['status']=='publishing':
-      from app.errors import DeferredIngress
+      from .errors import DeferredIngress
       raise DeferredIngress()
      if pending:
       hints=db.execute("SELECT count(*) AS n FROM tgmate.outbox_events WHERE event_type='bot.private_reply' AND aggregate_id=%s AND payload->>'kind'='appeal_hint' AND (payload->>'target_user_id')::bigint=%s AND created_at>now()-interval '1 minute'",(bot_id,user)).fetchone()['n']
@@ -85,7 +85,7 @@ def receive(tenant,bot_id,update):
    if reason is None:
     enqueue(db,tenant,bot_id,action['robot_instance_id'],user,'请回复本条消息，说明申诉原因。',prefix,kind='appeal_prompt',action_id=action_id,markup={'force_reply':True,'selective':True,'input_field_placeholder':'请输入申诉原因'})
     if callback is not None:
-     from app.verification import enqueue_ack
+     from .verification import enqueue_ack
      context=db.execute('SELECT * FROM tgmate.moderation_group_configs WHERE id=%s',(action['group_config_id'],)).fetchone()
      enqueue_ack(db,tenant,context,{'id':action_id},callback.get('id'),'appeal_prompt',aggregate_type='moderation_action')
     status='prompt_queued'

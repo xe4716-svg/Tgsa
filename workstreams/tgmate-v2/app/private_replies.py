@@ -1,7 +1,7 @@
 """Private replies only to users who initiated an authenticated Bot interaction."""
 import uuid
 from psycopg.types.json import Jsonb
-from app.db import seal
+from .db import seal
 
 
 def enqueue(db,tenant,bot,robot,user,text,key,kind='appeal_reply',action_id=None,markup=None):
@@ -17,8 +17,8 @@ def enqueue(db,tenant,bot,robot,user,text,key,kind='appeal_reply',action_id=None
 
 def review_reply(tenant,identifier,user_id,decision,evidence,remote_message_id=None):
  if decision not in ('confirm_sent','confirm_failed','retry','cancel') or not 10<=len(evidence.strip())<=1000: raise ValueError('需要核对决定和证据')
- from app.db import transaction
- from app.relay import Rejected
+ from .db import transaction
+ from .relay import Rejected
  with transaction(tenant) as db:
   if not user_id or not db.execute("SELECT user_id FROM tgmate.tenant_members WHERE user_id=%s AND status='active'",(user_id,)).fetchone(): raise Rejected('审核人身份无效')
   job=db.execute("SELECT * FROM tgmate.outbox_events WHERE id=%s AND event_type='bot.private_reply' FOR UPDATE",(identifier,)).fetchone()

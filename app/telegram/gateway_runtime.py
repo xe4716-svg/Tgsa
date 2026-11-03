@@ -38,7 +38,7 @@ class GatewayRunner:
         self.rpc_timeout,self.close_timeout=rpc_timeout,close_timeout
         self._running=False
 
-    async def run(self,tenant_id,account_id,stop,*,ready=None):
+    async def run(self,tenant_id,account_id,stop,*,ready=None,route_generation=None):
         if self._running:
             raise RuntimeError('Runner already owns an account lifecycle')
         self._running=True
@@ -66,6 +66,11 @@ class GatewayRunner:
 
         async def read_material(decrypt):
             async with self.leases.fenced_transaction(lease) as conn:
+                if route_generation is not None:
+                    valid=await conn.fetchval('''SELECT true FROM account_gateway_routes
+                        WHERE tenant_id=$1 AND account_id=$2 AND enabled AND generation=$3''',
+                        tenant_id,account_id,route_generation)
+                    if not valid:raise LeaseLost('Route changed')
                 return await self.loader(conn,lease,self.vault,decrypt=decrypt)
 
         async def heartbeat():

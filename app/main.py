@@ -15,6 +15,7 @@ from app.config import settings, validate_startup_settings
 from app.health import router as health_router
 from app.telegram.router import router as telegram_resources_router
 from app.telegram.login_router import router as telegram_login_router
+from app.telegram.gateway_router import router as gateway_router
 from app.telegram.login_manager import TelegramLoginManager
 from app.integration.router import router as business_reads_router
 from app.integration.relay_control import router as relay_control_router
@@ -100,6 +101,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(telegram_resources_router)
 app.include_router(telegram_login_router)
+app.include_router(gateway_router)
 app.include_router(business_reads_router)
 app.include_router(relay_control_router)
 app.include_router(catalog_router)

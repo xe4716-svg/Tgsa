@@ -59,7 +59,7 @@ jobs:
           TGMATE_LOGIN_INTEGRATION: '1'
           NOTIFICATION_TEST_DATABASE_URL: postgresql://postgres:integration-test-only@localhost:5432/tgmate_ci
           NOTIFICATION_RUNTIME_DATABASE_URL: postgresql://tgs_runtime:ephemeral-runtime-test-only@localhost:5432/tgmate_ci
-        run: python -m pytest tests/test_billing_automation.py tests/test_login_persistence_database.py -q --junitxml=notification-login-results.xml
+        run: python -m pytest tests/test_billing_automation.py tests/test_login_persistence_database.py tests/test_bot_database.py -q --junitxml=notification-login-results.xml
 
   container:
     runs-on: ubuntu-latest
@@ -71,7 +71,7 @@ jobs:
       - name: Build API and worker image
         run: docker build --tag tgmate-ci .
       - name: Verify API and worker entrypoints exist
-        run: docker run --rm tgmate-ci python -c "import app.main; import app.workers.billing; import app.workers.mtproto"
+        run: docker run --rm tgmate-ci python -c "import app.main; import app.bot_main; import app.workers.billing; import app.workers.mtproto; import app.workers.gateway; import app.workers.bot"
       - name: Verify isolated Compose startup and migration replay
         run: python3 scripts/container_smoke.py
 

@@ -21,7 +21,7 @@ BASELINE_FILES = (
     '004f_relay_operator_auth.sql', '004g_operator_identity_invalidation.sql',
     '004h_relay_privacy_notice.sql',
 )
-FILES = BASELINE_FILES + ('004i_telegram_ai_safety.sql',)
+FILES = BASELINE_FILES + ('004i_telegram_ai_safety.sql','004j_bot_runtime_limits.sql')
 LOCK = '847293018422'
 
 

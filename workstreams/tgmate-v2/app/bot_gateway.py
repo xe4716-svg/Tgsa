@@ -1,8 +1,8 @@
 """One authenticated ingress per Bot, then tenant-scoped routing by actual chat coordinates."""
 import hashlib,json
 from psycopg.types.json import Jsonb
-from app.db import transaction
-from app.relay import Rejected
+from .db import transaction
+from .relay import Rejected
 
 
 def route(tenant,bot_id,update):
@@ -23,17 +23,17 @@ def route(tenant,bot_id,update):
   if not config: return {'status':'ignored_unconfigured_group'}
   if query is not None:
    if not isinstance(query.get('data'),str) or not query['data'].startswith('v:'): return {'status':'ignored'}
-   from app.verification import callback
+   from .verification import callback
    return callback(tenant,config['id'],update)
-  from app.moderation import receive
+  from .moderation import receive
   return receive(tenant,config['id'],update)
  if chat.get('type')=='private':
   sender=query.get('from') if query is not None else message.get('from')
   if not isinstance(sender,dict) or sender.get('is_bot') or type(sender.get('id')) is not int or sender['id']<=0 or chat.get('id')!=sender['id']: return {'status':'ignored_private_actor'}
-  from app.relay_operator import consume
+  from .relay_operator import consume
   control=consume(tenant,bot_id,update)
   if control is not None: return control
-  from app.appeals import receive as appeal
+  from .appeals import receive as appeal
   result=appeal(tenant,bot_id,update)
   if result is not None: return result
   if query is not None: return {'status':'ignored'}
@@ -44,11 +44,11 @@ def route(tenant,bot_id,update):
    with transaction(tenant) as db:
     paused=db.execute("SELECT id,robot_instance_id FROM tgmate.relay_configs WHERE telegram_bot_id=%s AND status='paused'",(bot_id,)).fetchall()
     if len(paused)==1:
-     from app.private_replies import enqueue
+     from .private_replies import enqueue
      enqueue(db,tenant,bot_id,paused[0]['robot_instance_id'],sender['id'],'客服当前暂停接待，请稍后重新发送消息。',f'relay-paused:{bot_id}:{update["update_id"]}',kind='relay_paused')
      return {'status':'paused_notice_queued'}
    return {'status':'ignored_no_private_handler'}
-  from app.relay import receive
+  from .relay import receive
   return receive(tenant,configs[0]['id'],update)
  return {'status':'ignored'}
 

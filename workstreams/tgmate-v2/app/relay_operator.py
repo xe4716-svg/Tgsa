@@ -1,7 +1,7 @@
 """Operator proves private Bot initiation using an expiring identity-bound challenge."""
 import hashlib,secrets
-from app.db import transaction
-from app.relay import Rejected
+from .db import transaction
+from .relay import Rejected
 
 def authorized(db,config):
  return bool(db.execute('SELECT 1 FROM tgmate.relay_operator_authorizations WHERE config_id=%s AND operator_user_id=%s AND confirmed_at IS NOT NULL',(config['id'],config['operator_user_id'])).fetchone())
@@ -32,7 +32,7 @@ def consume(tenant,bot_id,update):
   if row['confirmed_at'] is not None: return {'status':'operator_already_authorized'}
   if not db.execute('SELECT %s::timestamptz>now() AS valid',(row['expires_at'],)).fetchone()['valid']: return {'status':'operator_authorization_expired'}
   db.execute('UPDATE tgmate.relay_operator_authorizations SET confirmed_at=now() WHERE config_id=%s',(row['config_id'],))
-  from app.private_replies import enqueue
+  from .private_replies import enqueue
   enqueue(db,tenant,bot_id,row['robot_instance_id'],sender['id'],'客服接收授权已确认。请使用回复功能回应客户中转消息。',f'relay-auth:{row["config_id"]}:{row["challenge_hash"]}',kind='relay_operator_authorized')
   db.execute("INSERT INTO tgmate.audit_logs(tenant_id,action,resource_type,resource_id) VALUES(%s,'relay.operator_authorized','relay_config',%s)",(tenant,row['config_id']))
   return {'status':'operator_authorized'}

@@ -1,7 +1,7 @@
 """Explicit moderation enable/disable with fresh preflight and local change fencing."""
 from psycopg.types.json import Jsonb
-from app.db import transaction,settings
-from app.relay import Rejected
+from .db import transaction,settings
+from .relay import Rejected
 
 
 def snapshot(db,identifier,lock=False):
@@ -39,10 +39,10 @@ def set_enabled(tenant,identifier,actor,enabled,sandbox=False,adapter=None):
  source='injected_test_adapter' if adapter is not None else 'live_adapter'
  if sandbox:
   if settings().get('mode')!='sandbox': raise Rejected('仅本地沙盒允许模拟预检')
-  from app.sandbox import SandboxModeration
+  from .sandbox import SandboxModeration
   adapter=SandboxModeration();source='sandbox_simulated'
  elif adapter is None:
-  from app.telegram_adapters import ModerationBot
+  from .telegram_adapters import ModerationBot
   adapter=ModerationBot()
  needed=required_permissions(config,rules)
  try: facts=adapter.permissions(config)

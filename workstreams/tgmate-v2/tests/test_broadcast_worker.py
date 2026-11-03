@@ -26,7 +26,15 @@ def test_bot_dispatch_preflight_and_settlement(broadcast):
  with transaction(a['tenant']) as db:
   assert db.execute('SELECT status FROM tgmate.broadcast_task_runs WHERE id=%s',(run,)).fetchone()['status']=='completed'
   assert db.execute("SELECT consumed_value FROM tgmate.quota_accounts WHERE entitlement_code='broadcast.messages'").fetchone()['consumed_value']==1
+
  assert run_once(a['tenant'],settings()['worker_id'],adapter)['status']=='idle'
+
+def test_bot_worker_does_not_claim_account_broadcast_tasks(broadcast):
+ a,task,run=prepare(broadcast,account=True); adapter=Adapter()
+ assert run_once(a['tenant'],settings()['worker_id'],adapter,business_module='bot_broadcast')['status']=='idle'
+ assert adapter.checked==[] and adapter.sent==[]
+ with transaction(a['tenant']) as db:
+  assert db.execute('SELECT status FROM tgmate.broadcast_task_runs WHERE id=%s',(run,)).fetchone()['status']=='queued'
 
 def test_account_dispatch_stays_independent(broadcast):
  a,task,run=prepare(broadcast,account=True); adapter=Adapter()

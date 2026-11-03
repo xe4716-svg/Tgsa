@@ -4,7 +4,7 @@ Registration deliberately never changes the remote webhook.
 """
 import hashlib,re,uuid
 import httpx,psycopg
-from app.db import transaction,seal,unseal
+from .db import transaction,seal,unseal
 
 class RegistrationRejected(ValueError): pass
 

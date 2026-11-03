@@ -30,8 +30,9 @@ class GatewayLeases:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("SELECT set_config('app.tenant_id',$1,true)",str(tenant_id))
+                tenant = await conn.fetchrow('SELECT status FROM tenants WHERE id=$1 FOR SHARE',tenant_id)
                 row = await conn.fetchrow('SELECT status FROM telegram_accounts WHERE tenant_id=$1 AND id=$2 FOR UPDATE',tenant_id,account_id)
-                yield conn, bool(row and row['status'] in ('AUTHORIZED','ACTIVE'))
+                yield conn, bool(tenant and tenant['status']=='ACTIVE' and row and row['status'] in ('AUTHORIZED','ACTIVE'))
 
     @staticmethod
     def _ttl(ttl):

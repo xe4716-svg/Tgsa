@@ -1,6 +1,6 @@
 """Explicit sandbox adapter; all results are simulated and no network is used."""
 import uuid
-from app.db import transaction
+from .db import transaction
 class SandboxModeration:
  def member_role(self,config,user): return 'member'
  def permissions(self,config): return dict(membership_status='member',can_send_messages=True,can_delete_messages=True,can_restrict_members=True,can_ban_members=True)

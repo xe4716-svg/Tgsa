@@ -4,9 +4,9 @@ Secret envelopes authenticate tenant routing before any tenant database query.
 import hashlib,hmac,secrets,uuid
 from urllib.parse import urlsplit
 from cryptography.fernet import InvalidToken
-from app.db import transaction,settings,seal,unseal
-from app.bot_credentials import resolve_token
-from app.worker import PermanentFailure,UnknownSend,RetryLater
+from .db import transaction,settings,seal,unseal
+from .bot_credentials import resolve_token
+from .worker import PermanentFailure,UnknownSend,RetryLater
 
 class WebhookRejected(ValueError): pass
 
@@ -49,7 +49,7 @@ def ingress(bot,secret):
  return {'tenant_id':tenant}
 
 def apply(tenant,actor,bot,allow_replace=False,adapter=None,retry_uncertain=False):
- from app.telegram_adapters import BotBroadcast
+ from .telegram_adapters import BotBroadcast
  adapter=adapter or BotBroadcast()
  operation=uuid.uuid4()
  with transaction(tenant) as db:
@@ -85,7 +85,7 @@ def apply(tenant,actor,bot,allow_replace=False,adapter=None,retry_uncertain=Fals
 
 def reconcile(tenant,bot,adapter=None):
  """Read remote URL only. Matching URL cannot prove secret_token installation."""
- from app.telegram_adapters import BotBroadcast
+ from .telegram_adapters import BotBroadcast
  adapter=adapter or BotBroadcast()
  with transaction(tenant) as db:
   row=db.execute('SELECT * FROM tgmate.bot_webhook_registrations WHERE bot_id=%s',(bot,)).fetchone()

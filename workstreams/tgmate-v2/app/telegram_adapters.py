@@ -1,18 +1,21 @@
 """Live adapters are opt-in and have not been tested against real Telegram identities."""
 import asyncio,uuid
 import httpx
-from app.db import settings
-from app.worker import UnknownSend,RetryLater,PermanentFailure
+from .db import settings
+from .worker import UnknownSend,RetryLater,PermanentFailure
 
 class BotBroadcast:
- def __init__(self,client=None,token_resolver=None):
+ def __init__(self,client=None,token_resolver=None,rate_limiter=None):
   self.client=client or httpx.Client(timeout=15)
   self.token_resolver=token_resolver
+  self.rate_limiter=rate_limiter
  def call(self,executor,method,data):
+  if self.rate_limiter is not None:
+   self.rate_limiter.check(executor['tenant_id'],executor['telegram_bot_id'])
   if self.token_resolver is not None:
    token=self.token_resolver(executor['telegram_bot_id'])
   else:
-   from app.bot_credentials import resolve_token
+   from .bot_credentials import resolve_token
    if not executor.get('tenant_id'): raise PermanentFailure('Bot tenant context unavailable')
    token=resolve_token(executor['tenant_id'],executor['telegram_bot_id'])
   if not token: raise PermanentFailure('Bot credential unavailable')
@@ -20,7 +23,14 @@ class BotBroadcast:
   except httpx.TransportError: raise UnknownSend() from None
   try: body=response.json()
   except ValueError: raise UnknownSend() from None
-  if response.status_code==429: raise RetryLater(body.get('parameters',{}).get('retry_after',30))
+  if response.status_code==429:
+   seconds=body.get('parameters',{}).get('retry_after') if isinstance(body,dict) else None
+   if type(seconds) is not int or seconds<1:
+    if self.rate_limiter is not None: self.rate_limiter.fail()
+    raise PermanentFailure('Telegram server wait is unavailable')
+   if self.rate_limiter is not None:
+    self.rate_limiter.defer(executor['tenant_id'],executor['telegram_bot_id'],seconds)
+   raise RetryLater(seconds)
   if response.status_code>=500: raise UnknownSend()
   if not isinstance(body,dict) or not body.get('ok'): raise PermanentFailure('Telegram rejected request')
   return body.get('result')

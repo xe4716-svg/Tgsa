@@ -1,12 +1,12 @@
 """One durable welcome/challenge/success notice, with conservative unknown-outcome handling."""
 import uuid
 from psycopg.types.json import Jsonb
-from app.db import transaction,unseal
-from app.jobs import acquire,valid,release
-from app.quota import reserve,settle,QuotaExceeded
-from app.worker import RetryLater,PermanentFailure,UnknownSend
-from app.moderation_worker import config_for,active
-from app.verification import delivered,end_session
+from .db import transaction,unseal
+from .jobs import acquire,valid,release
+from .quota import reserve,settle,QuotaExceeded
+from .worker import RetryLater,PermanentFailure,UnknownSend
+from .moderation_worker import config_for,active
+from .verification import delivered,end_session
 
 TYPES=('moderation.welcome','moderation.challenge','moderation.success')
 
@@ -94,7 +94,7 @@ def run_once(tenant,worker_id,adapter):
     review_failure(db,tenant,job,current,event)
    release(db,task,token); return {'status':'retry_wait' if retry else 'blocked'}
   if welcome and welcome['welcome_status']=='skipped':
-   from app.verification import start_session
+   from .verification import start_session
    start_session(db,tenant,welcome,event,current)
    db.execute("UPDATE tgmate.outbox_events SET status='published',locked_until=NULL WHERE id=%s",(job['id'],)); db.execute("UPDATE tgmate.task_registry SET status='completed' WHERE id=%s",(task,)); release(db,task,token)
    return {'status':'skipped'}

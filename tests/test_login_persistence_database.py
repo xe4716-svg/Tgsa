@@ -262,3 +262,101 @@ def test_gateway_server_wait_is_durable_and_fences_previous_owner():
         finally:
             await pool.close();await owner.execute('DELETE FROM tenants WHERE id=$1',tenant);await owner.close()
     asyncio.run(run())
+
+
+@pytest.mark.skipif(os.getenv('TGMATE_LOGIN_INTEGRATION') != '1', reason='disposable database opt-in required')
+def test_gateway_routes_are_versioned_scoped_and_stop_suspended_tenants():
+    from app.auth.dependencies import AuthPrincipal
+    from app.telegram.gateway_routes import GatewayRoutes, GatewayRoute, RouteConflict
+    from app.telegram.gateway_leases import GatewayLeases
+    async def run():
+        owner=await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
+        pool=await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'],min_size=1,max_size=4)
+        tenant,other,user,account,family=[uuid4() for _ in range(5)]
+        store=GatewayRoutes(pool);leases=GatewayLeases(pool)
+        principal=AuthPrincipal(user,tenant,family,'OWNER','test@example.test',False)
+        try:
+            await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'route-test'),($2,'route-other')",tenant,other)
+            await owner.execute('INSERT INTO users(id,auth_subject) VALUES($1,$1::uuid::text)',user)
+            await owner.execute("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'OWNER')",tenant,user)
+            await owner.execute("INSERT INTO auth_refresh_tokens(token_hash,tenant_id,user_id,family_id,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+interval '1 day')",secrets.token_hex(32),tenant,user,family)
+            await owner.execute("INSERT INTO telegram_accounts(id,tenant_id,status) VALUES($1,$2,'PENDING')",account,tenant)
+            assert (await store.read(tenant,account))['generation']==0
+            with pytest.raises(RouteConflict):await store.change(principal,account,True,0)
+            await owner.execute("UPDATE telegram_accounts SET status='AUTHORIZED' WHERE id=$1",account)
+            results=await asyncio.gather(*(store.change(principal,account,True,0) for _ in range(4)),return_exceptions=True)
+            assert sum(isinstance(x,dict) for x in results)==1
+            assert sum(isinstance(x,RouteConflict) for x in results)==3
+            route=GatewayRoute(tenant,account,1)
+            assert await store.enabled(tenant)==[route]
+            assert await store.enabled(other)==[] and await store.read(other,account) is None
+            async with pool.acquire() as conn:
+                assert await conn.fetchval('SELECT count(*) FROM account_gateway_routes')==0
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.tenant_id',$1,true)",str(other))
+                    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                        async with conn.transaction():
+                            await conn.execute('INSERT INTO account_gateway_routes(tenant_id,account_id) VALUES($1,$2)',tenant,account)
+            # An old account lifecycle cannot pause a newly requested generation.
+            assert (await store.change(principal,account,True,1))['generation']==2
+            assert not await store.pause(route,'CONNECTION_CLOSED')
+            assert (await store.read(tenant,account))['enabled']
+            current=GatewayRoute(tenant,account,2)
+            lease=await leases.acquire(tenant,account,'routed-worker')
+            await owner.execute("UPDATE tenants SET status='SUSPENDED' WHERE id=$1",tenant)
+            assert await store.enabled(tenant)==[]
+            assert not await leases.renew(lease)
+            assert await leases.release(lease)
+            assert await leases.acquire(tenant,account,'next-worker') is None
+            await owner.execute("UPDATE tenants SET status='ACTIVE' WHERE id=$1",tenant)
+            assert await store.pause(current,'CONNECTION_CLOSED')
+            row=await store.read(tenant,account)
+            assert not row['enabled'] and row['generation']==3 and row['last_reason']=='CONNECTION_CLOSED'
+            await owner.execute("UPDATE tenant_memberships SET role='VIEWER' WHERE tenant_id=$1",tenant)
+            with pytest.raises(PermissionError):await store.change(principal,account,True,3)
+            assert await owner.fetchval("SELECT count(*) FROM audit_logs WHERE tenant_id=$1 AND action='GATEWAY_ROUTE_CHANGED'",tenant)==2
+        finally:
+            await pool.close()
+            await owner.execute('DELETE FROM tenants WHERE id=ANY($1::uuid[])',[tenant,other])
+            await owner.execute('DELETE FROM users WHERE id=$1',user)
+            await owner.close()
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(os.getenv('TGMATE_LOGIN_INTEGRATION') != '1', reason='disposable database opt-in required')
+def test_gateway_route_rechecks_revocation_after_account_lock_wait():
+    from app.auth.dependencies import AuthPrincipal
+    from app.telegram.gateway_routes import GatewayRoutes
+    async def run():
+        owner=await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
+        name='route-race-'+uuid4().hex
+        pool=await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'],min_size=1,max_size=1,server_settings={'application_name':name})
+        tenant,user,account,family=[uuid4() for _ in range(4)]
+        task=None;tx=None
+        try:
+            await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'route-race')",tenant)
+            await owner.execute('INSERT INTO users(id,auth_subject) VALUES($1,$1::uuid::text)',user)
+            await owner.execute("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'OWNER')",tenant,user)
+            await owner.execute("INSERT INTO auth_refresh_tokens(token_hash,tenant_id,user_id,family_id,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+interval '1 day')",secrets.token_hex(32),tenant,user,family)
+            await owner.execute("INSERT INTO telegram_accounts(id,tenant_id,status) VALUES($1,$2,'AUTHORIZED')",account,tenant)
+            tx=owner.transaction();await tx.start()
+            await owner.execute('SELECT id FROM telegram_accounts WHERE id=$1 FOR UPDATE',account)
+            principal=AuthPrincipal(user,tenant,family,'OWNER','test@example.test',False)
+            task=asyncio.create_task(GatewayRoutes(pool).change(principal,account,True,0))
+            for _ in range(200):
+                await owner.execute('SELECT pg_stat_clear_snapshot()')
+                if await owner.fetchval("SELECT count(*) FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock'",name):break
+                await asyncio.sleep(.01)
+            else:pytest.fail('Route did not block on account lock')
+            await owner.execute('UPDATE auth_refresh_tokens SET revoked_at=clock_timestamp() WHERE tenant_id=$1',tenant)
+            await tx.commit();tx=None
+            with pytest.raises(PermissionError):await asyncio.wait_for(task,5)
+            assert await owner.fetchval('SELECT count(*) FROM account_gateway_routes WHERE tenant_id=$1',tenant)==0
+        finally:
+            if tx:await tx.rollback()
+            if task and not task.done():task.cancel();await asyncio.gather(task,return_exceptions=True)
+            await pool.close()
+            await owner.execute('DELETE FROM tenants WHERE id=$1',tenant)
+            await owner.execute('DELETE FROM users WHERE id=$1',user)
+            await owner.close()
+    asyncio.run(run())
