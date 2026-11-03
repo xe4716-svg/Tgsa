@@ -207,3 +207,50 @@ async def test_shutdown_cleans_up_all_pending_tasks(monkeypatch):
         assert len(manager._pending) == 0
         assert pending.wait_task.done() or pending.wait_task.cancelled()
         pending.client.disconnect.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_resolve_proxy_profile_rls_and_isolation(monkeypatch):
+    headers = get_auth_headers()
+    proxy_id = str(uuid.uuid4())
+
+    # 1. DIRECT mode shouldn't query the proxy profile DB
+    with patch("app.telegram.login_manager.create_client") as mock_create_client:
+        mock_create_client.return_value = AsyncMock()
+        mock_create_client.return_value.qr_login.return_value = AsyncMock(url="test_url")
+        with TestClient(app) as client:
+            response = client.post("/telegram/login/qr", json={"connection_mode": "DIRECT"}, headers=headers)
+        assert response.status_code == 200
+
+    # 2. PROXY mode with an unverified/inactive proxy throws 400
+    with patch("app.main.asyncpg.create_pool", new_callable=AsyncMock) as mock_pool:
+        class MockConnectionUnverified:
+            async def __aenter__(self): return self
+            async def __aexit__(self, exc_type, exc, tb): pass
+            async def execute(self, *args, **kwargs): pass
+            def transaction(self): return self
+            async def fetchrow(self, query, *args, **kwargs):
+                if "proxy_profiles" in query:
+                    return {
+                        "id": args[1],
+                        "proxy_type": "socks5",
+                        "host": "localhost",
+                        "port": 1080,
+                        "username": "",
+                        "password": "",
+                        "secret": "",
+                        "verification_status": "UNVERIFIED",
+                        "status": "ACTIVE"
+                    }
+                if "users u" in query:
+                    return {"email": "test@example.com", "status": "ACTIVE", "platform_admin": False, "role": "OWNER", "tenant_status": "ACTIVE", "session_active": True}
+                return None
+        class MockPoolClassUnverified:
+            def acquire(self): return MockConnectionUnverified()
+            async def close(self): pass
+
+        mock_pool.return_value = MockPoolClassUnverified()
+
+        with TestClient(app) as client:
+            response = client.post("/telegram/login/qr", json={"connection_mode": "PROXY", "proxy_profile_id": proxy_id}, headers=headers)
+        assert response.status_code == 400
+        assert "verified and active" in response.json()["detail"].lower()

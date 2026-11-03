@@ -69,20 +69,25 @@ async def _resolve_proxy_profile(request: Request, connection_mode: str, proxy_p
 
     pool: asyncpg.Pool = request.app.state.db_pool
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, proxy_type, host, port, username, password, secret, verification_status, status
-            FROM proxy_profiles
-            WHERE tenant_id = $1 AND id = $2
-            """,
-            tenant_id,
-            proxy_profile_id,
-        )
-        if not row:
-            raise ValueError("Proxy profile not found")
-        if row["status"] != "ACTIVE" or row["verification_status"] != "VERIFIED":
-            raise ValueError("Proxy must be verified and active")
-        return dict(row)
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('app.tenant_id', $1, true)",
+                str(tenant_id),
+            )
+            row = await conn.fetchrow(
+                """
+                SELECT id, proxy_type, host, port, username, password, secret, verification_status, status
+                FROM proxy_profiles
+                WHERE tenant_id = $1 AND id = $2
+                """,
+                tenant_id,
+                proxy_profile_id,
+            )
+            if not row:
+                raise ValueError("Proxy profile not found")
+            if row["status"] != "ACTIVE" or row["verification_status"] != "VERIFIED":
+                raise ValueError("Proxy must be verified and active")
+            return dict(row)
 
 
 @router.post("/telegram/login/qr")
