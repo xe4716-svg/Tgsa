@@ -28,12 +28,12 @@
     },
     {
       "file": "docs/validation/work-unit.xml",
-      "tests": 222,
-      "passed": 212,
+      "tests": 224,
+      "passed": 214,
       "failures": 0,
       "errors": 0,
       "skipped": 10,
-      "timestamp": "2026-11-03T11:02:54.598957+08:00"
+      "timestamp": "2026-11-03T11:10:55.124516+08:00"
     },
     {
       "file": "docs/validation/work-v2.xml",
@@ -54,5 +54,14 @@
   "external_payment_tested": false,
   "production_deployed": false,
   "final_product_accepted": false,
-  "note": "Suites overlap; counts are not unique coverage or product completion percentages. Docker build/Compose must be checked by GitHub CI; no local Docker is installed."
+  "note": "Suites overlap; counts are not unique coverage or product completion percentages. Docker build/Compose must be checked by GitHub CI; no local Docker is installed.",
+  "ci_followup": {
+    "tested_initial_commit": "a3e49c3d62fa3f81b5de4298533881a4e2f9d58a",
+    "initial_root_database": "success",
+    "initial_preserved_v2": "success",
+    "initial_billing": "success",
+    "initial_static": "success",
+    "initial_compose": "failed due to hardcoded 12 business migrations; follow-up now uses migrate_business.FILES",
+    "latest_head_ci": "check GitHub PR #27 HEAD"
+  }
 }

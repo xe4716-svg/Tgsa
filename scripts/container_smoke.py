@@ -8,6 +8,10 @@ import subprocess
 import sys
 from uuid import uuid4
 
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.migrate_business import FILES
+
 def main():
     root = Path(__file__).resolve().parents[1]
     runtime = root/'.env.runtime'
@@ -44,7 +48,7 @@ def main():
             assert 'APP_DB_PASSWORD' not in config['services'][service].get('environment', {})
         assert config['services']['api']['depends_on']['migrate']['condition']=='service_completed_successfully'
         run(['up','--build','--wait','--wait-timeout','240','api','billing'], 'container startup and readiness')
-        expected = str(len(list((root/'migrations').glob('*.sql'))))+'|12'
+        expected = str(len(list((root/'migrations').glob('*.sql'))))+'|'+str(len(FILES))
         actual = run(['exec','-T','db','psql','-U','postgres','-d','tgs','-Atqc',
                       "SELECT (SELECT count(*) FROM public.schema_migrations)::text || '|' || (SELECT count(*) FROM public.business_schema_migrations)::text"],
                      'schema ledgers').strip()
