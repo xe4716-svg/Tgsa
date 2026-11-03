@@ -94,11 +94,11 @@ CREATE INDEX idx_gateway_command_events_command
 CREATE FUNCTION public.reject_gateway_command_event_mutation()
 RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, public
-AS $
+AS $$
 BEGIN
     RAISE EXCEPTION 'gateway command events are append-only';
 END;
-$;
+$$;
 REVOKE ALL ON FUNCTION public.reject_gateway_command_event_mutation() FROM PUBLIC;
 CREATE TRIGGER trg_gateway_command_events_append_only
     BEFORE UPDATE OR DELETE ON public.gateway_account_command_events

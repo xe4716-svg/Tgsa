@@ -4,6 +4,7 @@ This module never loads Telegram session material and never creates a Telethon
 client. The caller must already own the account Gateway lease.
 """
 from dataclasses import dataclass
+import json
 from typing import Any
 from uuid import UUID
 
@@ -86,7 +87,7 @@ class GatewayCommandStore:
             operation_key=row["operation_key"],
             operation_kind=row["operation_kind"],
             destination_peer_id=row["destination_peer_id"],
-            payload=dict(row["payload"]),
+            payload=json.loads(row["payload"]) if isinstance(row["payload"], str) else dict(row["payload"]),
             claim_worker_id=row["claim_worker_id"],
             claim_fencing_token=row["claim_fencing_token"],
             claim_until=row["claim_until"],
