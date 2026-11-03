@@ -1,0 +1,46 @@
+{
+  "date": "2026-11-03",
+  "production_deployed": false,
+  "real_telegram_requests": false,
+  "suites_overlap": true,
+  "suites": {
+    "unified-unit.xml": {
+      "tests": 330,
+      "passed": 299,
+      "skipped": 31,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 3.125
+    },
+    "unified-database.xml": {
+      "tests": 330,
+      "passed": 307,
+      "skipped": 23,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 14.981
+    },
+    "unified-transactions.xml": {
+      "tests": 27,
+      "passed": 27,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 5.944
+    },
+    "unified-v2.xml": {
+      "tests": 208,
+      "passed": 208,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 26.353
+    }
+  },
+  "notes": [
+    "Root database skips are opt-in cases run in the separate transaction suite; suites include overlapping tests.",
+    "Local PG16.15 tmpfs disposable clusters; Docker is verified remotely.",
+    "One existing Starlette/httpx TestClient deprecation warning.",
+    "No real Telegram, public proxy or payment integration and no production capacity claim."
+  ]
+}

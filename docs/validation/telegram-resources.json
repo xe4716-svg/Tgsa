@@ -1,0 +1,20 @@
+{
+  "database": "tgs_migration_3d6b1861c534",
+  "production": false,
+  "actual_postgresql": true,
+  "api_test": "authenticated principal overridden; real restricted-role asyncpg pool; actual route SQL",
+  "role": "temporary LOGIN NOSUPERUSER NOBYPASSRLS; only USAGE public and SELECT accounts/proxies",
+  "assertions": [
+    "no tenant context returns zero rows",
+    "two tenant account isolation",
+    "two tenant proxy isolation",
+    "equal-timestamp id cursor pagination without duplicates",
+    "caller tenant_id ignored",
+    "role and seeded rows cleaned up"
+  ],
+  "result": "1 passed, 1 warning in 1.68s",
+  "source_sha256": {
+    "app/telegram/router.py": "c7c447189bf69eda7905e2cf42e7ee5cd17228f8fbb9c0ec441a70657d354b8b",
+    "tests/test_telegram_resources_database.py": "6acbcacf27cb70994e21f5412684bd76ce827200885335e6730710f16e14dd1d"
+  }
+}

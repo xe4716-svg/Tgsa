@@ -1,0 +1,12 @@
+{
+  "source": "tgmate_test",
+  "restored_to": "tgmate_restore_audit",
+  "backup_restored": true,
+  "snapshot_matches": true,
+  "snapshot": {
+    "tables": 86,
+    "forced_rls_tables": 75,
+    "relay_operations": 30
+  },
+  "production": false
+}

@@ -1,0 +1,67 @@
+{
+  "date": "2026-11-03",
+  "timezone": "Asia/Shanghai",
+  "repository": "xe4716-svg/Tgsa",
+  "source_baseline": "117173fba945cee1487ca00feed6047d0b43150b",
+  "integrated_pr_heads": {
+    "25": "cf66aef07c9866cdbd2d5b4cf675643d6887ae4d",
+    "26": "6034a187fabc72c947f8ffedf25cef074f1940d1"
+  },
+  "reports": [
+    {
+      "file": "docs/validation/work-notifications.xml",
+      "tests": 6,
+      "passed": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "timestamp": "2026-11-03T11:07:09.038532+08:00"
+    },
+    {
+      "file": "docs/validation/work-takeover.xml",
+      "tests": 222,
+      "passed": 220,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "timestamp": "2026-11-03T11:06:00.996392+08:00"
+    },
+    {
+      "file": "docs/validation/work-unit.xml",
+      "tests": 224,
+      "passed": 214,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 10,
+      "timestamp": "2026-11-03T11:10:55.124516+08:00"
+    },
+    {
+      "file": "docs/validation/work-v2.xml",
+      "tests": 207,
+      "passed": 207,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "timestamp": "2026-11-03T11:02:00.941190+08:00"
+    }
+  ],
+  "postgresql": "16.15",
+  "root_migrations": 10,
+  "business_migrations": 13,
+  "sql_and_plpgsql_parsed": true,
+  "import_manifest_verified": true,
+  "external_telegram_tested": false,
+  "external_payment_tested": false,
+  "production_deployed": false,
+  "final_product_accepted": false,
+  "note": "Suites overlap; counts are not unique coverage or product completion percentages. Docker build/Compose must be checked by GitHub CI; no local Docker is installed.",
+  "ci_followup": {
+    "tested_initial_commit": "a3e49c3d62fa3f81b5de4298533881a4e2f9d58a",
+    "initial_root_database": "success",
+    "initial_preserved_v2": "success",
+    "initial_billing": "success",
+    "initial_static": "success",
+    "initial_compose": "failed due to hardcoded 12 business migrations; follow-up now uses migrate_business.FILES",
+    "latest_head_ci": "check GitHub PR #27 HEAD"
+  }
+}

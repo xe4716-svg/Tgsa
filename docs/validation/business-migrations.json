@@ -1,0 +1,51 @@
+{
+  "production": false,
+  "databases": [
+    "tgs_business_de732751dfae",
+    "tgs_business_dbd403442296",
+    "tgs_business_8ac9f7010930",
+    "tgs_business_22bab156bd68",
+    "tgs_business_92408abe2c04"
+  ],
+  "actual_postgresql": true,
+  "passed": true,
+  "business_ledger_count": 12,
+  "root_ledger_count": 10,
+  "checks": [
+    "first",
+    "repeat",
+    "original SQL hashes",
+    "drift rejection",
+    "missing root rejection",
+    "untracked schema rejection",
+    "failed file rollback",
+    "resume after failure",
+    "combined bootstrap first/repeat",
+    "sensitive columns denied",
+    "metadata columns readable",
+    "mapping writes denied"
+  ],
+  "source_sha256": {
+    "source_001_003/001_core_foundation.sql": "b2d4e422e810aaeef41cc5e08907f9492bfd8b8f23bc9bc07f9ba219380264d8",
+    "source_001_003/002_broadcast_channels.sql": "c96ba56df9d249c0c95ee43e2e8e88457f895443b3cc66676d9fe475ebade11e",
+    "source_001_003/003_group_moderation.sql": "4706391c04014cff63b4a13b237e4ff12a3b117d2a9b9cc6162bc62817af5e76",
+    "tgmate_v2_004_bidirectional.sql": "8fc8014698930ab35543ee50be29cceeee278b3e00d5a3ed4c818661e94cf15e",
+    "004a_relay_runtime.sql": "af8b94263285cee410c1e3af32dc0dea48493bf7a926b075d123f07eb25c4e3b",
+    "004b_moderation_control_hardening.sql": "1fcf017f0d812dbaae82bf1a32687f007d3d39841aa4d0f32a0f6927d1f8641e",
+    "004c_web_auth.sql": "feb8ca7b646dc0eccf65d148a0bf639dafed571766de300b84246288076e2205",
+    "004d_bot_credentials.sql": "8ad865e10c56c2da41568daa7321c418a77d1ac6972ab0e5c002bcc509386080",
+    "004e_bot_webhooks.sql": "c583e5c7055e437f0512c30724cf075bdef821ae7187c7f30b9ae14800258eb1",
+    "004f_relay_operator_auth.sql": "726e7c8c6eae4ae0b442d20a37b75e7332ec17670af86920d0a0b1bd6417b122",
+    "004g_operator_identity_invalidation.sql": "273090d313b3a7d6556847aafbe20e6d043b630e2e3f06ac3a0161f702cfa269",
+    "004h_relay_privacy_notice.sql": "7b54e37fef7ae63697a4a38af9f08ba2b36897df3d6559ab9cb30e639e52bbb8"
+  },
+  "result": "5 passed in 15.29s",
+  "runtime_password_restored": true,
+  "tool_sha256": {
+    "scripts/migrate_business.py": "c6e4cab80393d8d66e29510d7d53d806468a11e3e11fcf36d1a03470e1c247aa",
+    "scripts/bootstrap_combined.py": "6e1610777df97d3c0f97e93829b4386451e8a0e4f45e06770a52222ef1be6cea",
+    "scripts/link_identity.py": "9fd55532c8b4fee9ed5a5626af9839f20dabf18d19e6366ac8f70ee4cda547a2",
+    "scripts/configure_business_reads.py": "fde18e663fadccf3b6650da8752ef3e335919485d8bd2729a6f983ba77b6daef",
+    "tests/test_business_migrations.py": "65c54a7b0aadc2c2fe749484b5d6a4556766bb1ed66c0d3c71d357e3f83b4f2c"
+  }
+}

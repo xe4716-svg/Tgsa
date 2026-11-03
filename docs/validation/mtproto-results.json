@@ -1,0 +1,47 @@
+{
+  "repository": "xe4716-svg/Tgsa",
+  "baseline": "a0ceefe7c928d13ebbed5f6f3ef84829cc833a82",
+  "date": "2026-11-03",
+  "timezone": "Asia/Shanghai",
+  "postgresql": "16.15",
+  "reports": [
+    {
+      "file": "docs/validation/mtproto-database.xml",
+      "tests": 273,
+      "passed": 257,
+      "skipped": 16,
+      "errors": 0,
+      "failures": 0,
+      "timestamp": "2026-11-03T12:03:20.202595+08:00"
+    },
+    {
+      "file": "docs/validation/mtproto-transactions.xml",
+      "tests": 20,
+      "passed": 20,
+      "skipped": 0,
+      "errors": 0,
+      "failures": 0,
+      "timestamp": "2026-11-03T12:04:08.849831+08:00"
+    },
+    {
+      "file": "docs/validation/mtproto-unit.xml",
+      "tests": 273,
+      "passed": 249,
+      "skipped": 24,
+      "errors": 0,
+      "failures": 0,
+      "timestamp": "2026-11-03T12:03:15.479124+08:00"
+    }
+  ],
+  "new_database_migrations": 0,
+  "read_only_gateway_entrypoint": true,
+  "gateway_flood_wait_persisted": true,
+  "pending_login_handoff_gate": true,
+  "real_telethon_constructor_verified_without_connection": true,
+  "external_telegram_tested": false,
+  "external_proxy_tested": false,
+  "production_deployed": false,
+  "multiaccount_scheduler_completed": false,
+  "api_login_cooldown_persisted": false,
+  "note": "Gateway connection lifecycle uses simulated Telegram adapters alongside actual encrypted PostgreSQL material, lease and handoff tests. Suites overlap; no complete-product acceptance claimed."
+}

@@ -2,6 +2,12 @@
 .env
 .env.*
 !.env.example
+!.env.runtime.example
+!.env.bot.runtime.example
+!.env.mtproto.runtime.example
+*.dump
+*.backup
+*.backup.enc
 *.session
 *.session-journal
 *.pem

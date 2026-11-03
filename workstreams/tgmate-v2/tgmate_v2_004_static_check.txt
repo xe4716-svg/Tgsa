@@ -1,0 +1,104 @@
+{
+  "checks": [
+    {
+      "file": "source_001_003\\001_core_foundation.sql",
+      "sha256": "b2d4e422e810aaeef41cc5e08907f9492bfd8b8f23bc9bc07f9ba219380264d8",
+      "sql_statements_parsed": 76,
+      "plpgsql_functions_parsed": 4,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "source_001_003\\002_broadcast_channels.sql",
+      "sha256": "c96ba56df9d249c0c95ee43e2e8e88457f895443b3cc66676d9fe475ebade11e",
+      "sql_statements_parsed": 52,
+      "plpgsql_functions_parsed": 8,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "source_001_003\\003_group_moderation.sql",
+      "sha256": "4706391c04014cff63b4a13b237e4ff12a3b117d2a9b9cc6162bc62817af5e76",
+      "sql_statements_parsed": 49,
+      "plpgsql_functions_parsed": 4,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "tgmate_v2_004_bidirectional.sql",
+      "sha256": "8fc8014698930ab35543ee50be29cceeee278b3e00d5a3ed4c818661e94cf15e",
+      "sql_statements_parsed": 14,
+      "plpgsql_functions_parsed": 3,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004a_relay_runtime.sql",
+      "sha256": "af8b94263285cee410c1e3af32dc0dea48493bf7a926b075d123f07eb25c4e3b",
+      "sql_statements_parsed": 6,
+      "plpgsql_functions_parsed": 0,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004b_moderation_control_hardening.sql",
+      "sha256": "1fcf017f0d812dbaae82bf1a32687f007d3d39841aa4d0f32a0f6927d1f8641e",
+      "sql_statements_parsed": 3,
+      "plpgsql_functions_parsed": 1,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004c_web_auth.sql",
+      "sha256": "feb8ca7b646dc0eccf65d148a0bf639dafed571766de300b84246288076e2205",
+      "sql_statements_parsed": 19,
+      "plpgsql_functions_parsed": 6,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004d_bot_credentials.sql",
+      "sha256": "8ad865e10c56c2da41568daa7321c418a77d1ac6972ab0e5c002bcc509386080",
+      "sql_statements_parsed": 10,
+      "plpgsql_functions_parsed": 0,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004e_bot_webhooks.sql",
+      "sha256": "c583e5c7055e437f0512c30724cf075bdef821ae7187c7f30b9ae14800258eb1",
+      "sql_statements_parsed": 6,
+      "plpgsql_functions_parsed": 0,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004f_relay_operator_auth.sql",
+      "sha256": "726e7c8c6eae4ae0b442d20a37b75e7332ec17670af86920d0a0b1bd6417b122",
+      "sql_statements_parsed": 6,
+      "plpgsql_functions_parsed": 0,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004g_operator_identity_invalidation.sql",
+      "sha256": "273090d313b3a7d6556847aafbe20e6d043b630e2e3f06ac3a0161f702cfa269",
+      "sql_statements_parsed": 4,
+      "plpgsql_functions_parsed": 1,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    },
+    {
+      "file": "004h_relay_privacy_notice.sql",
+      "sha256": "7b54e37fef7ae63697a4a38af9f08ba2b36897df3d6559ab9cb30e639e52bbb8",
+      "sql_statements_parsed": 6,
+      "plpgsql_functions_parsed": 0,
+      "missing_referenced_tables": [],
+      "status": "PASS"
+    }
+  ],
+  "scope": "PostgreSQL parser plus referenced-table name checks only; not catalog/type/privilege validation",
+  "database_migrations_executed_by_this_script": false,
+  "database_execution_report": "DATABASE_MIGRATION_RESULTS.json",
+  "telegram_tests_executed": false
+}

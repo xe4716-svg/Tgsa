@@ -23,16 +23,16 @@ def build_proxy(proxy_profile: dict[str, Any] | None):
     port = proxy_profile.get("port")
     if not isinstance(host, str) or not host.strip():
         raise ValueError("Invalid proxy host")
-    if not isinstance(port, int) or not 1 <= port <= 65535:
+    if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Invalid proxy port")
     if proxy_profile.get("verification_status") != "VERIFIED":
         raise ValueError("Proxy must pass connection testing before use")
     if proxy_profile.get("status", "ACTIVE") != "ACTIVE":
         raise ValueError("Proxy profile is disabled")
 
-    if proxy_type == "SOCKS5":
+    if proxy_type in ("SOCKS5", "HTTP_CONNECT"):
         return {
-            "proxy_type": "socks5",
+            "proxy_type": "socks5" if proxy_type == "SOCKS5" else "http",
             "addr": host,
             "port": port,
             "username": proxy_profile.get("username"),
@@ -48,11 +48,6 @@ def build_proxy(proxy_profile: dict[str, Any] | None):
         return (
             (host, port, secret),
             connection.ConnectionTcpMTProxyRandomizedIntermediate,
-        )
-
-    if proxy_type == "HTTP_CONNECT":
-        raise NotImplementedError(
-            "HTTP CONNECT is disabled until its transport adapter passes end-to-end tests"
         )
 
     raise ValueError("Unsupported proxy type")
@@ -80,11 +75,13 @@ def create_client(
     *,
     connection_mode: ConnectionMode,
     proxy_profile: dict[str, Any] | None = None,
+    managed: bool = False,
 ):
     """Create a Telethon client with an explicit, user-selected route."""
     from telethon import TelegramClient
     from telethon.sessions import StringSession
 
+    connection_mode = str(connection_mode).upper()
     _require_api_credentials()
     validate_connection_choice(connection_mode, proxy_profile)
 
@@ -95,9 +92,11 @@ def create_client(
 
     kwargs: dict[str, Any] = {
         "proxy": proxy,
-        "connection_retries": 3,
-        "request_retries": 3,
-        "auto_reconnect": True,
+        "connection_retries": 0 if managed else 3,
+        "request_retries": 0 if managed else 3,
+        "auto_reconnect": not managed,
+        "receive_updates": not managed,
+        "flood_sleep_threshold": 0,
         "retry_delay": 2,
         "timeout": 10,
         "sequential_updates": True,

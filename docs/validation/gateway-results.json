@@ -1,0 +1,42 @@
+{
+  "repository": "xe4716-svg/Tgsa",
+  "baseline": "0d54f8fa35c5ffd8e269780592cb7da3008226c1",
+  "date": "2026-11-03",
+  "timezone": "Asia/Shanghai",
+  "reports": [
+    {
+      "file": "docs/validation/gateway-database.xml",
+      "tests": 242,
+      "passed": 234,
+      "skipped": 8,
+      "failures": 0,
+      "errors": 0,
+      "timestamp": "2026-11-03T11:29:40.276717+08:00"
+    },
+    {
+      "file": "docs/validation/gateway-transactions.xml",
+      "tests": 12,
+      "passed": 12,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "timestamp": "2026-11-03T11:30:27.803586+08:00"
+    },
+    {
+      "file": "docs/validation/gateway-unit.xml",
+      "tests": 242,
+      "passed": 226,
+      "skipped": 16,
+      "failures": 0,
+      "errors": 0,
+      "timestamp": "2026-11-03T11:28:11.027191+08:00"
+    }
+  ],
+  "postgresql": "16.15",
+  "new_database_migrations": 0,
+  "existing_lease_table_reused": true,
+  "external_telegram_tested": false,
+  "production_deployed": false,
+  "physical_connection_runner_completed": false,
+  "note": "Suites overlap. Pending login flows and Telegram cooldown deadlines remain process-local; distributed gateway connection lifecycle and persistent cooldown remain required."
+}

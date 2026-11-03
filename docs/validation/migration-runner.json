@@ -1,0 +1,17 @@
+{
+  "database": "tgs_migration_3d6b1861c534",
+  "production": false,
+  "fresh_database": true,
+  "first_exit": 0,
+  "repeat_exit": 0,
+  "failure_exit": 1,
+  "drift_exit": 1,
+  "missing_exit": 1,
+  "ledger_count": 9,
+  "failed_table_absent": true,
+  "preflight_table_absent": true,
+  "passed": true,
+  "runtime_password_restored": true,
+  "runner_sha256": "c8512ab97fbebca3736cdff67f9eda7bc9b98c683af922cff262e56979871d5d",
+  "compatibility_transform": "Only 001_core.sql exact GRANT CONNECT ON DATABASE tgs binds current_database via format %I; original source hashes retained."
+}

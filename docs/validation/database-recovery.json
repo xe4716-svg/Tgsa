@@ -1,0 +1,15 @@
+{
+  "production": false,
+  "source": "tgs_migration_11059c074e6c",
+  "restored_database": "tgs_restore_9ac80683dc14",
+  "ledger_count": 9,
+  "ledger_hashes_equal": true,
+  "source_tables": 38,
+  "restored_tables": 38,
+  "rls_enabled": true,
+  "unscoped_runtime_visible_accounts": 0,
+  "unscoped_insert_rejected": true,
+  "password_changed": false,
+  "dump_location": "private local storage; excluded from source",
+  "passed": true
+}

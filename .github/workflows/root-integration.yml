@@ -1,0 +1,108 @@
+name: Root integration checks
+
+on:
+  pull_request:
+    paths: ['app/**', 'tests/**', 'scripts/**', 'migrations/**', 'requirements.txt', 'Dockerfile', 'docker-compose.yml', 'workstreams/tgmate-v2/**', '.github/workflows/root-integration.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: integration-test-only
+          POSTGRES_DB: tgmate_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: integration-test-only
+      PGDATABASE: tgmate_ci
+      APP_DB_PASSWORD: ephemeral-runtime-test-only
+      TGMATE_MIGRATION_INTEGRATION: '1'
+      TGMATE_RESOURCE_INTEGRATION: '1'
+      TGMATE_IDENTITY_INTEGRATION: '1'
+      TGMATE_BUSINESS_READS_INTEGRATION: '1'
+      TGMATE_BUSINESS_MIGRATION_INTEGRATION: '1'
+      TGMATE_RELAY_CONTROL_INTEGRATION: '1'
+      TGMATE_CATALOG_INTEGRATION: '1'
+      TGMATE_SCHEMA_ADOPTION_INTEGRATION: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install 'psycopg[binary]>=3.2,<4'
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Root tests and fresh database migration lifecycle
+        run: python -m pytest tests -q --junitxml=root-test-results.xml
+
+      - name: Verify notification and login transactions with restricted runtime role
+        env:
+          TGMATE_NOTIFICATION_INTEGRATION: '1'
+          TGMATE_LOGIN_INTEGRATION: '1'
+          NOTIFICATION_TEST_DATABASE_URL: postgresql://postgres:integration-test-only@localhost:5432/tgmate_ci
+          NOTIFICATION_RUNTIME_DATABASE_URL: postgresql://tgs_runtime:ephemeral-runtime-test-only@localhost:5432/tgmate_ci
+        run: python -m pytest tests/test_billing_automation.py tests/test_login_persistence_database.py tests/test_bot_database.py -q --junitxml=notification-login-results.xml
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build API and worker image
+        run: docker build --tag tgmate-ci .
+      - name: Verify API and worker entrypoints exist
+        run: docker run --rm tgmate-ci python -c "import app.main; import app.bot_main; import app.workers.billing; import app.workers.mtproto; import app.workers.gateway; import app.workers.bot"
+      - name: Verify isolated Compose startup and migration replay
+        run: python3 scripts/container_smoke.py
+
+  preserved-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: integration-test-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: integration-test-only
+      TGMATE_V2_REGRESSION: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt 'psycopg[binary]>=3.2,<4' 'regex>=2026.9.29'
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Run preserved business tests after forward safety migrations
+        run: python scripts/verify_v2_regression.py
