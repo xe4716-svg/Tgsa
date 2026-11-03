@@ -37,7 +37,7 @@ BEGIN
         INSERT INTO public.gateway_account_command_events(
             tenant_id,command_id,account_id,transition,actor_class,metadata
         ) SELECT tenant_id,id,account_id,
-            CASE status WHEN 'queued' THEN 'cancelled' ELSE 'unknown' END,
+            CASE status WHEN 'queued' THEN 'requeued' ELSE 'unknown' END,
             'gateway',jsonb_build_object('reason_code',
                 CASE status WHEN 'queued' THEN 'CLAIM_EXPIRED_BEFORE_DISPATCH' ELSE 'WORKER_LOST_AFTER_DISPATCH' END)
           FROM recovered
