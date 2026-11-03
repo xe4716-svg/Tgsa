@@ -78,7 +78,10 @@ CREATE TABLE public.gateway_account_command_events (
         'rejected', 'flood_wait', 'unknown', 'cancelled', 'reconciled'
     )),
     actor_class TEXT NOT NULL CHECK (actor_class IN ('business_worker', 'gateway', 'operator')),
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(metadata) = 'object'),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (
+        jsonb_typeof(metadata) = 'object'
+        AND (metadata - ARRAY['retry_after','remote_message_id','duration_ms','reason_code','previous_status','next_status']) = '{}'::jsonb
+    ),
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     FOREIGN KEY (tenant_id, account_id)
         REFERENCES public.telegram_accounts(tenant_id, id) ON DELETE CASCADE,
@@ -87,6 +90,19 @@ CREATE TABLE public.gateway_account_command_events (
 );
 CREATE INDEX idx_gateway_command_events_command
     ON public.gateway_account_command_events(tenant_id, command_id, id);
+
+CREATE FUNCTION public.reject_gateway_command_event_mutation()
+RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $
+BEGIN
+    RAISE EXCEPTION 'gateway command events are append-only';
+END;
+$;
+REVOKE ALL ON FUNCTION public.reject_gateway_command_event_mutation() FROM PUBLIC;
+CREATE TRIGGER trg_gateway_command_events_append_only
+    BEFORE UPDATE OR DELETE ON public.gateway_account_command_events
+    FOR EACH ROW EXECUTE FUNCTION public.reject_gateway_command_event_mutation();
 ALTER TABLE public.gateway_account_command_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.gateway_account_command_events FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_scope ON public.gateway_account_command_events
