@@ -143,3 +143,14 @@ def test_supervisor_requires_bounded_explicit_tenants():
     for tenants,options in [([] ,{}),([uuid4()],{'capacity':0}),([uuid4()],{'per_tenant':30}),
                             ([uuid4() for _ in range(101)],{})]:
         with pytest.raises(ValueError):GatewaySupervisor(None,None,tenants,**options)
+
+
+@pytest.mark.anyio
+async def test_pause_storage_failure_cannot_hide_uncertain_disconnect_or_skip_other_cleanup():
+    tenant=uuid4();store=Routes([tenant],2);factory=Factory()
+    for route in store.rows[tenant]:factory.results[route.account_id]=GatewayCloseUncertain('synthetic')
+    store.pause.side_effect=OSError('private database diagnostic')
+    supervisor=GatewaySupervisor(store,factory,[tenant],capacity=2,per_tenant=2,poll_interval=.001)
+    with pytest.raises(GatewayCloseUncertain):await supervisor.serve(asyncio.Event())
+    assert len(factory.exits)==2 and not supervisor.running
+    assert store.pause.await_count==2

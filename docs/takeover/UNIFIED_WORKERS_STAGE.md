@@ -28,6 +28,9 @@
 2. 新 V2 测试插入位置错误，将原测试的末尾断言放进新测试；移动回原测试后重跑。
 3. 本地 overlay 存储反复触发 PG “unexpected data beyond EOF”，不是略过失败；切换全新 tmpfs 一次性集群后完成 208 项原 V2 回归。远端独立 PG/Docker 结果仍需按当前 HEAD 核实。
 4. 一条既有 Starlette/httpx TestClient 弃用警告仍在，未将其隐藏。
+5. 后续故障注入发现断开不明时，暂停路由的数据库异常可能覆盖致命退出分类；已保留 DISCONNECT_UNCERTAIN，并确保尝试所有账号的关闭记录。新增数据库写入失败的双账号清理测试。
+
+c70d8b4 的远端 Root integration 41581603517、Billing 41581603448、V2 static 41581603514 均成功；根工程 306、专项 27、原 V2 208 通过，Docker 基础 Compose 成功。其后的清理修复和 API/Bot/MTProto 实际容器启动检查，以 PR 最新 HEAD 的独立 CI 为准；不把旧 SHA 的绿色状态套用到新提交。
 
 ## 未完成与下一门禁
 

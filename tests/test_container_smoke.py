@@ -33,7 +33,8 @@ def test_compose_checks_current_migration_release_and_cleans_runtime(tmp_path, m
     def run(command, **kwargs):
         calls.append(command)
         if 'config' in command:
-            stdout = json.dumps({'services':{'api':{'depends_on':{'migrate':{'condition':'service_completed_successfully'}}},'billing':{}}})
+            stdout = json.dumps({'services':{'api':{'depends_on':{'migrate':{'condition':'service_completed_successfully'}}},'billing':{},
+                'bot':{'environment':{'BOT_WORKER_DATABASE_URL':'postgresql://tgs_bot_worker:synthetic@db/tgs'}},'mtproto':{}}})
         elif 'psql' in command:
             count = len(module.FILES) if correct_ledger else len(module.FILES)-1
             stdout = f'1|{count}\n'
@@ -43,5 +44,7 @@ def test_compose_checks_current_migration_release_and_cleans_runtime(tmp_path, m
     monkeypatch.setattr(module.subprocess, 'run', run)
     assert module.main() == (0 if correct_ledger else 1)
     assert not (tmp_path/'.env.runtime').exists()
+    assert not (tmp_path/'.env.bot.runtime').exists()
+    assert not (tmp_path/'.env.mtproto.runtime').exists()
     assert any('down' in command for command in calls)
     assert any('run' in command for command in calls) == correct_ledger

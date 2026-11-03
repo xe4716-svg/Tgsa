@@ -50,10 +50,13 @@ class GatewaySupervisor:
             del self.running[key]
             try:
                 result=entry.task.result()
-            except GatewayCloseUncertain:
-                await self.routes.pause(entry.route,'DISCONNECT_UNCERTAIN')
+            except GatewayCloseUncertain as exc:
+                try:
+                    await self.routes.pause(entry.route,'DISCONNECT_UNCERTAIN')
+                except Exception:
+                    pass
                 # Stop the process: an unconfirmed old socket must be inspected.
-                raise
+                raise exc
             except asyncio.CancelledError:
                 await self.routes.pause(entry.route,'GATEWAY_FAILED')
                 raise RuntimeError('Account lifecycle was unexpectedly cancelled') from None
@@ -102,16 +105,24 @@ class GatewaySupervisor:
             entry.stop.set()
         results=await asyncio.gather(*(entry.task for entry in entries),return_exceptions=True)
         self.running.clear()
+        uncertain=None;failed=False
         for entry,result in zip(entries,results):
             if isinstance(result,GatewayCloseUncertain):
-                await self.routes.pause(entry.route,'DISCONNECT_UNCERTAIN')
-                raise result
-            if isinstance(result,BaseException):
-                await self.routes.pause(entry.route,'GATEWAY_FAILED')
-                raise RuntimeError('Account cleanup failed') from None
-            # Do not discard a failure occurring concurrently with shutdown.
-            if result.reason not in ('STOPPED','ACCOUNT_UNAVAILABLE'):
-                await self.routes.pause(entry.route,result.reason)
+                uncertain=result;reason='DISCONNECT_UNCERTAIN'
+            elif isinstance(result,BaseException):
+                failed=True;reason='GATEWAY_FAILED'
+            elif result.reason not in ('STOPPED','ACCOUNT_UNAVAILABLE'):
+                reason=result.reason
+            else:
+                continue
+            # Attempt every pause even if one write fails. A storage error may
+            # not hide the fatal "old socket could still be open" classification.
+            try:
+                await self.routes.pause(entry.route,reason)
+            except Exception:
+                failed=True
+        if uncertain is not None:raise uncertain
+        if failed:raise RuntimeError('Account cleanup failed') from None
 
     async def serve(self, stop):
         try:

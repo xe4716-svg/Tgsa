@@ -5,20 +5,20 @@
   "suites_overlap": true,
   "suites": {
     "unified-unit.xml": {
-      "tests": 329,
-      "passed": 298,
+      "tests": 330,
+      "passed": 299,
       "skipped": 31,
       "failures": 0,
       "errors": 0,
-      "seconds": 2.861
+      "seconds": 3.125
     },
     "unified-database.xml": {
-      "tests": 329,
-      "passed": 306,
+      "tests": 330,
+      "passed": 307,
       "skipped": 23,
       "failures": 0,
       "errors": 0,
-      "seconds": 15.685
+      "seconds": 14.981
     },
     "unified-transactions.xml": {
       "tests": 27,
@@ -26,7 +26,7 @@
       "skipped": 0,
       "failures": 0,
       "errors": 0,
-      "seconds": 6.327
+      "seconds": 5.944
     },
     "unified-v2.xml": {
       "tests": 208,

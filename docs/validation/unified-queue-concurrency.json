@@ -4,6 +4,6 @@
   "jobs": 40,
   "threads": 8,
   "unique_sends": 40,
-  "seconds": 0.4875,
+  "seconds": 0.3834,
   "production_capacity_claim": false
 }
