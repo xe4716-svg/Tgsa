@@ -18,6 +18,7 @@ def test_account_session_proxy_and_consent_commit_atomically():
         owner = await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
         runtime = await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'], min_size=1, max_size=1)
         tenant, user, proxy = uuid4(), uuid4(), uuid4()
+        family_id = uuid4()
         other_tenant = uuid4()
         telegram_id = secrets.randbelow(2**50)+1
         vault = SessionVault(b'x'*32, 'test-key')
@@ -26,10 +27,11 @@ def test_account_session_proxy_and_consent_commit_atomically():
             await owner.execute("INSERT INTO users(id,auth_subject) VALUES($1,$1::uuid::text)",user)
             await owner.execute("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'OWNER')",tenant,user)
             await owner.execute("INSERT INTO proxy_profiles(id,tenant_id,proxy_type,host,port,verification_status,verified_sharing_mode) VALUES($1,$2,'SOCKS5','proxy.example.test',1080,'VERIFIED','EXCLUSIVE')",proxy,tenant)
+            await owner.execute("INSERT INTO auth_refresh_tokens(token_hash,tenant_id,user_id,family_id,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+interval '1 day')",secrets.token_hex(32),tenant,user,family_id)
             profile=dict(proxy_type='SOCKS5',host='proxy.example.test',port=1080,verification_status='VERIFIED',status='ACTIVE')
             snapshot=await owner.fetchrow('SELECT * FROM proxy_profiles WHERE id=$1',proxy)
             profile['_revision']=proxy_revision(dict(snapshot))
-            kwargs=dict(pool=runtime,tenant_id=tenant,user_id=user,account={'telegram_user_id':telegram_id},session_string='synthetic-session-secret',vault=vault,connection_mode='PROXY',proxy_profile=profile,proxy_profile_id=proxy,notice_version='v1.0')
+            kwargs=dict(pool=runtime,tenant_id=tenant,user_id=user,family_id=family_id,account={'telegram_user_id':telegram_id},session_string='synthetic-session-secret',vault=vault,connection_mode='PROXY',proxy_profile=profile,proxy_profile_id=proxy,notice_version='v1.0')
             with pytest.raises(ValueError,match='verified and active'):
                 await persist_authorized_account(**{**kwargs,'proxy_profile_id':uuid4()})
             assert await owner.fetchval('SELECT count(*) FROM telegram_accounts WHERE tenant_id=$1',tenant)==0
@@ -61,5 +63,105 @@ def test_account_session_proxy_and_consent_commit_atomically():
             await runtime.close()
             await owner.execute('DELETE FROM tenants WHERE id=ANY($1::uuid[])',[tenant,other_tenant])
             await owner.execute('DELETE FROM users WHERE id=$1',user)
+            await owner.close()
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(os.getenv('TGMATE_LOGIN_INTEGRATION') != '1', reason='disposable database opt-in required')
+@pytest.mark.parametrize('change',['viewer','remove','disabled','revoked','expired'])
+def test_proxy_lock_wait_rechecks_current_write_authority(change):
+    async def run():
+        owner=await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
+        app_name='login-race-'+uuid4().hex
+        pool=await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'],min_size=1,max_size=1,server_settings={'application_name':app_name})
+        tenant,user,proxy,family=[uuid4() for _ in range(4)]
+        token=secrets.token_hex(32)
+        task=None;tx=None
+        try:
+            await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'race-test')",tenant)
+            await owner.execute('INSERT INTO users(id,auth_subject) VALUES($1,$1::uuid::text)',user)
+            await owner.execute("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'OWNER')",tenant,user)
+            await owner.execute("INSERT INTO auth_refresh_tokens(token_hash,tenant_id,user_id,family_id,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+interval '1 day')",token,tenant,user,family)
+            await owner.execute("INSERT INTO proxy_profiles(id,tenant_id,proxy_type,host,port,verification_status) VALUES($1,$2,'SOCKS5','proxy.example.test',1080,'VERIFIED')",proxy,tenant)
+            row=await owner.fetchrow('SELECT * FROM proxy_profiles WHERE id=$1',proxy)
+            profile=dict(row);profile['_revision']=proxy_revision(profile)
+            tx=owner.transaction();await tx.start()
+            await owner.execute('SELECT id FROM proxy_profiles WHERE id=$1 FOR UPDATE',proxy)
+            task=asyncio.create_task(persist_authorized_account(pool,tenant_id=tenant,user_id=user,family_id=family,
+                account={'telegram_user_id':secrets.randbelow(2**50)+1},session_string='synthetic',vault=SessionVault(b'x'*32,'test-key'),
+                connection_mode='PROXY',proxy_profile=profile,proxy_profile_id=proxy,notice_version='v1.0'))
+            for _ in range(200):
+                await owner.execute('SELECT pg_stat_clear_snapshot()')
+                if await owner.fetchval("SELECT count(*) FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock'",app_name):
+                    break
+                await asyncio.sleep(0.01)
+            else:pytest.fail('Persistence did not block on the controlled proxy lock')
+            if change=='viewer':await owner.execute("UPDATE tenant_memberships SET role='VIEWER' WHERE tenant_id=$1 AND user_id=$2",tenant,user)
+            elif change=='remove':await owner.execute('DELETE FROM tenant_memberships WHERE tenant_id=$1 AND user_id=$2',tenant,user)
+            elif change=='disabled':await owner.execute("UPDATE users SET status='DISABLED' WHERE id=$1",user)
+            elif change=='revoked':await owner.execute('UPDATE auth_refresh_tokens SET revoked_at=clock_timestamp() WHERE token_hash=$1',token)
+            else:await owner.execute("UPDATE auth_refresh_tokens SET expires_at=clock_timestamp()-interval '1 second' WHERE token_hash=$1",token)
+            await tx.commit();tx=None
+            with pytest.raises(PermissionError):await asyncio.wait_for(task,5)
+            for table in ['telegram_accounts','telegram_sessions','account_proxy_bindings','connection_consents','audit_logs']:
+                assert await owner.fetchval(f'SELECT count(*) FROM {table} WHERE tenant_id=$1',tenant)==0
+        finally:
+            if tx:await tx.rollback()
+            if task and not task.done():
+                task.cancel();await asyncio.gather(task,return_exceptions=True)
+            await pool.close()
+            await owner.execute('DELETE FROM tenants WHERE id=$1',tenant)
+            await owner.execute('DELETE FROM users WHERE id=$1',user)
+            await owner.close()
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(os.getenv('TGMATE_LOGIN_INTEGRATION') != '1', reason='disposable database opt-in required')
+def test_gateway_lease_ownership_fencing_and_rls():
+    from dataclasses import replace
+    from app.telegram.gateway_leases import GatewayLeases,LeaseLost
+    async def run():
+        owner=await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
+        pool=await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'],min_size=1,max_size=12)
+        tenant,other,account=[uuid4() for _ in range(3)]
+        leases=GatewayLeases(pool)
+        try:
+            await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'lease-test'),($2,'other-lease')",tenant,other)
+            await owner.execute("INSERT INTO telegram_accounts(id,tenant_id,status) VALUES($1,$2,'AUTHORIZED')",account,tenant)
+            claims=await asyncio.gather(*(leases.acquire(tenant,account,'worker-'+str(i)) for i in range(12)))
+            live=[claim for claim in claims if claim is not None]
+            assert len(live)==1
+            first=live[0]
+            assert await leases.renew(first)
+            assert await leases.acquire(other,account,'wrong-tenant') is None
+            assert not await leases.renew(replace(first,tenant_id=other))
+            async with leases.fenced_transaction(first) as conn:
+                await conn.execute("INSERT INTO account_security_events(tenant_id,account_id,event_type,severity) VALUES($1,$2,'LEASE_TEST','INFO')",tenant,account)
+            assert await leases.release(first)
+            second=await leases.acquire(tenant,account,'next-worker')
+            assert second.fencing_token==first.fencing_token+1
+            assert not await leases.renew(first) and not await leases.release(first)
+            with pytest.raises(LeaseLost):
+                async with leases.fenced_transaction(first):pytest.fail('Stale worker entered transaction')
+            # Expiry during a fenced transaction must roll back its writes.
+            with pytest.raises(LeaseLost):
+                async with leases.fenced_transaction(second) as conn:
+                    await conn.execute("INSERT INTO account_security_events(tenant_id,account_id,event_type,severity) VALUES($1,$2,'ROLLBACK_PROBE','INFO')",tenant,account)
+                    await conn.execute("UPDATE account_gateway_leases SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE account_id=$1",account)
+            assert await owner.fetchval("SELECT count(*) FROM account_security_events WHERE tenant_id=$1 AND event_type='ROLLBACK_PROBE'",tenant)==0
+            await owner.execute("UPDATE account_gateway_leases SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE account_id=$1",account)
+            assert not await leases.renew(second)
+            third=await leases.acquire(tenant,account,'third-worker')
+            assert third.fencing_token==second.fencing_token+1
+            await owner.execute("UPDATE telegram_accounts SET status='FROZEN' WHERE id=$1",account)
+            assert not await leases.renew(third)
+            with pytest.raises(LeaseLost):
+                async with leases.fenced_transaction(third):pytest.fail('Frozen account accepted')
+            assert await leases.release(third)
+            async with pool.acquire() as conn:
+                assert await conn.fetchval('SELECT count(*) FROM account_gateway_leases')==0
+        finally:
+            await pool.close()
+            await owner.execute('DELETE FROM tenants WHERE id=ANY($1::uuid[])',[tenant,other])
             await owner.close()
     asyncio.run(run())

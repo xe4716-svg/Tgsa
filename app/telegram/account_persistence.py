@@ -8,6 +8,7 @@ from app.security.session_vault import SessionVault
 from app.telegram.client_factory import validate_connection_choice
 from app.telegram.proxy_revision import proxy_revision
 from app.billing.service import FeatureLimitReached, ensure_limit
+from app.telegram.authorization import lock_login_authority
 
 
 async def persist_authorized_account(
@@ -15,6 +16,7 @@ async def persist_authorized_account(
     *,
     tenant_id: UUID,
     user_id: UUID,
+    family_id: UUID,
     account: dict,
     session_string: str,
     vault: SessionVault,
@@ -65,7 +67,7 @@ async def persist_authorized_account(
                 tenant_id,
                 user_id,
             )
-            if not membership:
+            if not membership or membership["role"] == "VIEWER":
                 raise PermissionError("User is not a member of this tenant")
 
             current_account_count = await conn.fetchval(
@@ -107,6 +109,7 @@ async def persist_authorized_account(
                 if proxy_revision(dict(proxy_row)) != proxy_profile.get("_revision"):
                     raise ValueError("Proxy configuration changed; restart authorization")
 
+            await lock_login_authority(conn, tenant_id, user_id, family_id)
             account_id = await conn.fetchval(
                 """
                 INSERT INTO telegram_accounts (
@@ -186,4 +189,5 @@ async def persist_authorized_account(
                 '{"connection_stage":"authorized","security_state":"NEW_DEVICE"}',
             )
 
+            await lock_login_authority(conn, tenant_id, user_id, family_id)
             return account_id

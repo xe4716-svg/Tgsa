@@ -79,7 +79,13 @@ async def lifespan(app: FastAPI):
                 app.state.tron_watcher_task = asyncio.create_task(
                     run_tron_watcher(app.state.db_pool, app.state.tron_watcher_stop)
                 )
-        app.state.telegram_login_manager = TelegramLoginManager()
+        app.state.telegram_login_manager = TelegramLoginManager(
+            max_pending=getattr(settings,'telegram_login_max_pending',100),
+            max_per_tenant=getattr(settings,'telegram_login_max_per_tenant',20),
+            max_per_user=getattr(settings,'telegram_login_max_per_user',3),
+            max_attempts=getattr(settings,'telegram_login_max_attempts',5),
+            network_timeout=getattr(settings,'telegram_login_network_timeout',30),
+        )
         stop = asyncio.Event()
         task = asyncio.create_task(run_telegram_cleanup(app.state.telegram_login_manager, stop))
         cleanup.push_async_callback(stop_telegram, app.state.telegram_login_manager, stop, task)

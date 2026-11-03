@@ -224,3 +224,15 @@ async def test_commit_finishing_after_ttl_still_records_consumed_result(env, mon
         response = await client.post('/telegram/login/opaque/consume', json={'notice_version':'v1.0'})
     assert response.status_code == 200 and response.json()=={'account_id':str(identifier)}
     assert pending.status == 'CONSUMED' and pending.session_string is None
+
+
+@pytest.mark.anyio
+async def test_login_capacity_and_telegram_wait_map_to_retry_after(env, monkeypatch):
+    from app.telegram.login_manager import LoginCapacityExceeded, LoginThrottled
+    app, manager, _ = env
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        for error in [LoginCapacityExceeded(30),LoginThrottled(90)]:
+            start=AsyncMock(side_effect=error)
+            monkeypatch.setattr(manager,'start_qr',start)
+            result=await client.post('/telegram/login/qr',json={'connection_mode':'DIRECT','notice_version':'v1.0','risk_acknowledged':True})
+            assert result.status_code==429 and result.headers['retry-after']==str(error.retry_after)

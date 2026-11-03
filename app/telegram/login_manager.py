@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import secrets
 import time
@@ -46,7 +47,22 @@ class PendingLogin:
     account_id: str | None = None
     proxy_revision: str | None = None
     notice_version: str = "v1.0"
+    rejected_attempts: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+class LoginThrottled(RuntimeError):
+    def __init__(self, retry_after):
+        self.retry_after = max(1, math.ceil(retry_after))
+        super().__init__("Telegram login temporarily limited")
+
+
+class LoginTransportUnavailable(RuntimeError):
+    pass
+
+
+class LoginCapacityExceeded(LoginThrottled):
+    pass
 
 
 class TelegramLoginManager:
@@ -58,10 +74,72 @@ class TelegramLoginManager:
     Never log login codes, 2FA passwords, QR tokens, or session strings.
     """
 
-    def __init__(self, ttl_seconds: int = 300):
+    def __init__(self, ttl_seconds: int = 300, *, max_pending=100, max_per_tenant=20,
+                 max_per_user=3, max_attempts=5, network_timeout=30):
+        if any(type(v) is not int or v<1 for v in (ttl_seconds,max_pending,max_per_tenant,max_per_user,max_attempts,network_timeout)):
+            raise ValueError("Login limits must be positive integers")
+        self.max_pending, self.max_per_tenant, self.max_per_user = max_pending,max_per_tenant,max_per_user
+        self.max_attempts, self.network_timeout = max_attempts,network_timeout
+        self._starting = {}
+        self._cooldowns = {}
+        self._closing = False
+        self._clock = time.monotonic
         self.ttl_seconds = ttl_seconds
         self._pending: dict[str, PendingLogin] = {}
         self._lock = asyncio.Lock()
+
+    def _retry_after(self, tenant_id, user_id):
+        return max(0, math.ceil(self._cooldowns.get((tenant_id,user_id),0)-self._clock()))
+
+    def _check_cooldown(self, tenant_id, user_id):
+        remaining = self._retry_after(tenant_id,user_id)
+        if remaining:
+            raise LoginThrottled(remaining)
+
+    def _record_flood(self, tenant_id, user_id, exc):
+        from telethon.errors import FloodWaitError
+        if isinstance(exc,FloodWaitError):
+            key=(tenant_id,user_id)
+            self._cooldowns[key]=max(self._cooldowns.get(key,0),self._clock()+max(1,exc.seconds))
+            return LoginThrottled(self._retry_after(*key))
+        return None
+
+    @asynccontextmanager
+    async def _reserve_start(self, tenant_id, user_id):
+        task = asyncio.current_task()
+        async with self._lock:
+            self._check_cooldown(tenant_id,user_id)
+            if self._closing:
+                raise LoginCapacityExceeded(30)
+            owners=[(p.tenant_id,p.user_id) for p in self._pending.values()]+list(self._starting.values())
+            if (len(owners)>=self.max_pending or sum(t==tenant_id for t,u in owners)>=self.max_per_tenant
+                    or owners.count((tenant_id,user_id))>=self.max_per_user):
+                raise LoginCapacityExceeded(30)
+            self._starting[task]=(tenant_id,user_id)
+        try:
+            yield
+        finally:
+            self._starting.pop(task,None)
+
+    async def _disconnect(self, client):
+        try:
+            await asyncio.wait_for(client.disconnect(),timeout=5)
+        except Exception:
+            pass
+
+    async def _fail(self, pending, code):
+        pending.status='FAILED'
+        pending.error_code=code
+        pending.session_string=None
+        await self._disconnect(pending.client)
+
+    async def _reject_attempt(self, pending, status, code):
+        pending.rejected_attempts+=1
+        if pending.rejected_attempts>=self.max_attempts:
+            await self._fail(pending,'LOGIN_ATTEMPTS_EXHAUSTED')
+        else:
+            pending.status=status
+            pending.error_code=code
 
     async def start_qr(
         self, tenant_id: str, user_id: str,
@@ -70,45 +148,51 @@ class TelegramLoginManager:
         proxy_profile: dict[str, Any] | None = None,
         notice_version: str = "v1.0",
     ) -> dict[str, Any]:
-        client = create_client(
-            connection_mode=connection_mode,
-            proxy_profile=proxy_profile,
-        )
-        try:
-            await client.connect()
-            qr = await client.qr_login()
-        except Exception:
-            await client.disconnect()
-            raise
+        async with self._reserve_start(tenant_id,user_id):
+            client = create_client(
+                connection_mode=connection_mode,
+                proxy_profile=proxy_profile,
+            )
+            try:
+                await asyncio.wait_for(client.connect(),timeout=self.network_timeout)
+                qr = await asyncio.wait_for(client.qr_login(),timeout=self.network_timeout)
+            except BaseException as exc:
+                await self._disconnect(client)
+                wait = self._record_flood(tenant_id,user_id,exc)
+                if wait:
+                    raise wait from None
+                if isinstance(exc,OSError):
+                    raise LoginTransportUnavailable("Telegram transport unavailable") from None
+                raise
 
-        now = time.time()
-        login_id = secrets.token_urlsafe(24)
-        pending = PendingLogin(
-            login_id=login_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            method="QR",
-            client=client,
-            created_at=now,
-            expires_at=now + self.ttl_seconds,
-            status="QR_PENDING",
-            qr_login=qr,
-            lock=asyncio.Lock(),
-            notice_version=notice_version,
-            connection_mode=connection_mode,
-            proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
-            proxy_revision=proxy_profile.get("_revision") if proxy_profile else None,
-        )
-        async with self._lock:
+            now = time.time()
+            login_id = secrets.token_urlsafe(24)
+            pending = PendingLogin(
+                login_id=login_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                method="QR",
+                client=client,
+                created_at=now,
+                expires_at=now + self.ttl_seconds,
+                status="QR_PENDING",
+                qr_login=qr,
+                lock=asyncio.Lock(),
+                notice_version=notice_version,
+                connection_mode=connection_mode,
+                proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
+                proxy_revision=proxy_profile.get("_revision") if proxy_profile else None,
+            )
             self._pending[login_id] = pending
-        pending.wait_task = asyncio.create_task(self._wait_for_qr(login_id))
-        return {
-            "login_id": login_id,
-            "qr_url": qr.url,
-            "status": pending.status,
-            "expires_in": self.ttl_seconds,
-            "qr_refresh_in": QR_WAIT_SECONDS,
-        }
+            pending.wait_task = asyncio.create_task(self._wait_for_qr(login_id))
+            return {
+                "login_id": login_id,
+                "qr_url": qr.url,
+                "status": pending.status,
+                "expires_in": self.ttl_seconds,
+                "qr_refresh_in": QR_WAIT_SECONDS,
+            }
+
 
     async def _wait_for_qr(self, login_id: str) -> None:
         pending = self._pending.get(login_id)
@@ -118,6 +202,11 @@ class TelegramLoginManager:
             user = await pending.qr_login.wait(timeout=QR_WAIT_SECONDS)
             await self._mark_authorized(pending, user)
         except Exception as exc:
+            wait = self._record_flood(pending.tenant_id,pending.user_id,exc)
+            if wait:
+                pending.status="QR_EXPIRED"
+                pending.error_code="FLOOD_WAIT"
+                return
             from telethon.errors import SessionPasswordNeededError
             if isinstance(exc, SessionPasswordNeededError):
                 pending.status = "PASSWORD_REQUIRED"
@@ -129,7 +218,7 @@ class TelegramLoginManager:
                 return
             pending.status = "FAILED"
             pending.error_code = "QR_LOGIN_FAILED"
-            await pending.client.disconnect()
+            await self._disconnect(pending.client)
 
     async def refresh_qr(
         self, login_id: str, tenant_id: str, user_id: str
@@ -137,7 +226,16 @@ class TelegramLoginManager:
         pending = self._get_owned(login_id, tenant_id, user_id)
         if pending.method != "QR" or pending.status != "QR_EXPIRED":
             raise ValueError("QR code is not ready to refresh")
-        await pending.qr_login.recreate()
+        self._check_cooldown(tenant_id,user_id)
+        try:
+            await asyncio.wait_for(pending.qr_login.recreate(),timeout=self.network_timeout)
+        except Exception as exc:
+            wait=self._record_flood(tenant_id,user_id,exc)
+            if wait:
+                raise wait from None
+            if isinstance(exc,OSError):
+                raise LoginTransportUnavailable("Telegram transport unavailable") from None
+            raise
         pending.status = "QR_PENDING"
         pending.error_code = None
         pending.wait_task = asyncio.create_task(self._wait_for_qr(login_id))
@@ -157,43 +255,49 @@ class TelegramLoginManager:
     ) -> dict[str, Any]:
         if not PHONE_RE.fullmatch(phone):
             raise ValueError("Phone number must use international E.164 format")
-        client = create_client(
-            connection_mode=connection_mode,
-            proxy_profile=proxy_profile,
-        )
-        try:
-            await client.connect()
-            sent = await client.send_code_request(phone)
-        except Exception:
-            await client.disconnect()
-            raise
+        async with self._reserve_start(tenant_id,user_id):
+            client = create_client(
+                connection_mode=connection_mode,
+                proxy_profile=proxy_profile,
+            )
+            try:
+                await asyncio.wait_for(client.connect(),timeout=self.network_timeout)
+                sent = await asyncio.wait_for(client.send_code_request(phone),timeout=self.network_timeout)
+            except BaseException as exc:
+                await self._disconnect(client)
+                wait = self._record_flood(tenant_id,user_id,exc)
+                if wait:
+                    raise wait from None
+                if isinstance(exc,OSError):
+                    raise LoginTransportUnavailable("Telegram transport unavailable") from None
+                raise
 
-        now = time.time()
-        login_id = secrets.token_urlsafe(24)
-        pending = PendingLogin(
-            login_id=login_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            method="PHONE",
-            client=client,
-            created_at=now,
-            expires_at=now + self.ttl_seconds,
-            status="CODE_REQUIRED",
-            phone=phone,
-            phone_code_hash=sent.phone_code_hash,
-            lock=asyncio.Lock(),
-            notice_version=notice_version,
-            connection_mode=connection_mode,
-            proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
-            proxy_revision=proxy_profile.get("_revision") if proxy_profile else None,
-        )
-        async with self._lock:
+            now = time.time()
+            login_id = secrets.token_urlsafe(24)
+            pending = PendingLogin(
+                login_id=login_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                method="PHONE",
+                client=client,
+                created_at=now,
+                expires_at=now + self.ttl_seconds,
+                status="CODE_REQUIRED",
+                phone=phone,
+                phone_code_hash=sent.phone_code_hash,
+                lock=asyncio.Lock(),
+                notice_version=notice_version,
+                connection_mode=connection_mode,
+                proxy_profile_id=str(proxy_profile["id"]) if proxy_profile else None,
+                proxy_revision=proxy_profile.get("_revision") if proxy_profile else None,
+            )
             self._pending[login_id] = pending
-        return {
-            "login_id": login_id,
-            "status": pending.status,
-            "expires_in": self.ttl_seconds,
-        }
+            return {
+                "login_id": login_id,
+                "status": pending.status,
+                "expires_in": self.ttl_seconds,
+            }
+
 
     def _get_owned(self, login_id: str, tenant_id: str, user_id: str) -> PendingLogin:
         pending = self._pending.get(login_id)
@@ -204,47 +308,65 @@ class TelegramLoginManager:
             raise TimeoutError("Login flow expired")
         return pending
 
-    async def submit_phone_code(
-        self, login_id: str, tenant_id: str, user_id: str, code: str
-    ) -> dict[str, Any]:
-        pending = self._get_owned(login_id, tenant_id, user_id)
-        if pending.method != "PHONE" or pending.status not in ("CODE_REQUIRED", "CODE_REJECTED"):
-            raise ValueError("This login flow is not waiting for a phone code")
-        if not code or len(code) > 16:
-            raise ValueError("Invalid verification code")
+    async def submit_phone_code(self, login_id, tenant_id, user_id, code):
+        from telethon.errors import SessionPasswordNeededError,PhoneCodeInvalidError,PhoneCodeExpiredError
+        pending=self._get_owned(login_id,tenant_id,user_id)
+        self._check_cooldown(tenant_id,user_id)
+        if pending.method!='PHONE' or pending.status not in ('CODE_REQUIRED','CODE_REJECTED'):
+            raise ValueError('This login flow is not waiting for a phone code')
+        if not code or len(code)>16:
+            raise ValueError('Invalid verification code')
         try:
-            user = await pending.client.sign_in(
-                phone=pending.phone,
-                code=code,
-                phone_code_hash=pending.phone_code_hash,
-            )
-            await self._mark_authorized(pending, user)
+            user=await asyncio.wait_for(pending.client.sign_in(phone=pending.phone,code=code,phone_code_hash=pending.phone_code_hash),timeout=self.network_timeout)
+            await self._mark_authorized(pending,user)
         except Exception as exc:
-            from telethon.errors import SessionPasswordNeededError
-            if isinstance(exc, SessionPasswordNeededError):
-                pending.status = "PASSWORD_REQUIRED"
+            wait=self._record_flood(tenant_id,user_id,exc)
+            if wait:
+                pending.error_code='FLOOD_WAIT'
+                raise wait from None
+            if isinstance(exc,SessionPasswordNeededError):
+                pending.status='PASSWORD_REQUIRED'
+                pending.error_code=None
+            elif isinstance(exc,PhoneCodeInvalidError):
+                await self._reject_attempt(pending,'CODE_REJECTED','PHONE_CODE_REJECTED')
+            elif isinstance(exc,PhoneCodeExpiredError):
+                await self._fail(pending,'PHONE_CODE_EXPIRED')
             else:
-                pending.status = "CODE_REJECTED"
-                pending.error_code = "PHONE_CODE_REJECTED"
-        return {"login_id": login_id, "status": pending.status}
+                await self._fail(pending,'LOGIN_FAILED')
+                if isinstance(exc,OSError):
+                    raise LoginTransportUnavailable('Telegram transport unavailable') from None
+                raise
+        return {'login_id':login_id,'status':pending.status}
 
-    async def submit_2fa_password(
-        self, login_id: str, tenant_id: str, user_id: str, password: str
-    ) -> dict[str, Any]:
-        pending = self._get_owned(login_id, tenant_id, user_id)
-        if pending.status not in ("PASSWORD_REQUIRED", "PASSWORD_REJECTED"):
-            raise ValueError("This login flow is not waiting for a 2FA password")
-        if not password or len(password) > 1024:
-            raise ValueError("Invalid 2FA password")
+    async def submit_2fa_password(self,login_id,tenant_id,user_id,password):
+        from telethon.errors import PasswordHashInvalidError
+        pending=self._get_owned(login_id,tenant_id,user_id)
+        self._check_cooldown(tenant_id,user_id)
+        if pending.status not in ('PASSWORD_REQUIRED','PASSWORD_REJECTED'):
+            raise ValueError('This login flow is not waiting for a 2FA password')
+        if not password or len(password)>1024:
+            raise ValueError('Invalid 2FA password')
         try:
-            user = await pending.client.sign_in(password=password)
-            await self._mark_authorized(pending, user)
-        except Exception:
-            pending.status = "PASSWORD_REJECTED"
-            pending.error_code = "TWO_FACTOR_PASSWORD_REJECTED"
-        return {"login_id": login_id, "status": pending.status}
+            user=await asyncio.wait_for(pending.client.sign_in(password=password),timeout=self.network_timeout)
+            await self._mark_authorized(pending,user)
+        except Exception as exc:
+            wait=self._record_flood(tenant_id,user_id,exc)
+            if wait:
+                pending.error_code='FLOOD_WAIT'
+                raise wait from None
+            if isinstance(exc,PasswordHashInvalidError):
+                await self._reject_attempt(pending,'PASSWORD_REJECTED','TWO_FACTOR_PASSWORD_REJECTED')
+            else:
+                await self._fail(pending,'LOGIN_FAILED')
+                if isinstance(exc,OSError):
+                    raise LoginTransportUnavailable('Telegram transport unavailable') from None
+                raise
+        return {'login_id':login_id,'status':pending.status}
 
     async def _mark_authorized(self, pending: PendingLogin, user: Any) -> None:
+        if type(getattr(user,"id",None)) is not int or user.id<=0:
+            raise ValueError("Invalid Telegram account identity")
+        pending.error_code=None
         pending.session_string = pending.client.session.save()
         phone = getattr(user, "phone", None)
         pending.account = {
@@ -264,6 +386,7 @@ class TelegramLoginManager:
             "status": pending.status,
             "account": pending.account if pending.status in ("AUTHORIZED", "CONSUMED") else None,
             "error_code": pending.error_code,
+            "retry_after": self._retry_after(tenant_id,user_id),
         }
 
     @asynccontextmanager
@@ -326,9 +449,16 @@ class TelegramLoginManager:
         await self._dispose(pending)
 
     async def cleanup_expired(self) -> int:
+        self._cooldowns={key:deadline for key,deadline in self._cooldowns.items() if deadline>self._clock()}
         expired = [item for item in list(self._pending.values()) if item.expires_at < time.time()]
         await asyncio.gather(*(self._dispose(item) for item in expired))
         return len(expired)
 
     async def shutdown(self) -> None:
+        async with self._lock:
+            self._closing=True
+            starts=[task for task in self._starting if task is not asyncio.current_task()]
+            for task in starts:
+                task.cancel()
+        await asyncio.gather(*starts,return_exceptions=True)
         await asyncio.gather(*(self._dispose(item) for item in list(self._pending.values())))

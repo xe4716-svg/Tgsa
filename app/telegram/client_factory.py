@@ -99,6 +99,7 @@ def create_client(
         "connection_retries": 3,
         "request_retries": 3,
         "auto_reconnect": True,
+        "flood_sleep_threshold": 0,
         "retry_delay": 2,
         "timeout": 10,
         "sequential_updates": True,

@@ -13,6 +13,11 @@ def _env_bool(name: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Settings:
     run_background_workers: bool = _env_bool('RUN_BACKGROUND_WORKERS', False)
+    telegram_login_max_pending: int = int(os.getenv('TELEGRAM_LOGIN_MAX_PENDING','100'))
+    telegram_login_max_per_tenant: int = int(os.getenv('TELEGRAM_LOGIN_MAX_PER_TENANT','20'))
+    telegram_login_max_per_user: int = int(os.getenv('TELEGRAM_LOGIN_MAX_PER_USER','3'))
+    telegram_login_max_attempts: int = int(os.getenv('TELEGRAM_LOGIN_MAX_ATTEMPTS','5'))
+    telegram_login_network_timeout: int = int(os.getenv('TELEGRAM_LOGIN_NETWORK_TIMEOUT','30'))
     app_name: str = os.getenv("APP_NAME", "TG SaaS API")
     app_env: str = os.getenv("APP_ENV", "development")
     database_url: str = os.getenv(

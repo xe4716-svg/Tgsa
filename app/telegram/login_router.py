@@ -14,6 +14,8 @@ from app.auth.dependencies import AuthPrincipal, get_current_principal
 from app.config import settings
 from app.security.session_vault import SessionVault
 from app.telegram.account_persistence import persist_authorized_account
+from app.telegram.authorization import lock_login_authority
+from app.telegram.login_manager import LoginThrottled, LoginTransportUnavailable
 
 
 class LoginRoute(APIRoute):
@@ -67,6 +69,10 @@ def _get_manager(request: Request):
 
 
 def _map_exception(exc: Exception) -> HTTPException:
+    if isinstance(exc, LoginThrottled):
+        return HTTPException(status_code=429, detail="Login temporarily limited",headers={"Retry-After":str(exc.retry_after)})
+    if isinstance(exc, LoginTransportUnavailable):
+        return HTTPException(status_code=503, detail="Telegram connection unavailable")
     if isinstance(exc, PermissionError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     if isinstance(exc, TimeoutError):
@@ -127,6 +133,7 @@ async def _record_consent(request, principal, body):
     async with request.app.state.db_pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(principal.tenant_id))
+            await lock_login_authority(conn, principal.tenant_id, principal.user_id, principal.family_id)
             await conn.execute(
                 """INSERT INTO connection_consents
                    (tenant_id,user_id,connection_mode,proxy_profile_id,notice_version)
@@ -301,6 +308,7 @@ async def consume_login(
                 pool,
                 tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
+                family_id=principal.family_id,
                 account=auth_data["account"],
                 session_string=auth_data["session_string"],
                 vault=vault,
