@@ -94,7 +94,8 @@ logins. Run serially: migrations contain cluster-wide role provisioning.
   assumption in the bot-worker test was repaired. Full suite is not green locally.
 * Local dependencies: Python 3.11.9, asyncpg 0.32.0, psycopg 3.3.6, Telethon 1.45.0,
   cryptography 46.0.7, pytest 8.4.2, FastAPI 0.162.0, Starlette 1.10.0. `pip check`
-  succeeded. Linux PostgreSQL 16 CI is added; its results must be checked separately.
+  succeeded. Linux PostgreSQL 16 CI on implementation commit `35c7788` completed:
+  **313 passed, 31 skipped, 0 failures/errors**, run [41654263499](https://github.com/xe4716-svg/Tgsa/actions/runs/41654263499).
 * New tests use no real Telegram client or credentials. No real messages sent.
 
 Full results are retained as JUnit artifacts in CI. Local reports are under
