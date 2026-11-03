@@ -35,6 +35,8 @@ CREATE TABLE public.gateway_account_commands (
     completed_at TIMESTAMPTZ,
     CONSTRAINT uq_gateway_account_command_operation
         UNIQUE (tenant_id, account_id, operation_key),
+    CONSTRAINT uq_gateway_account_command_scope
+        UNIQUE (tenant_id, account_id, id),
     CONSTRAINT fk_gateway_account_command_account
         FOREIGN KEY (tenant_id, account_id)
         REFERENCES public.telegram_accounts(tenant_id, id) ON DELETE CASCADE,
@@ -80,7 +82,8 @@ CREATE TABLE public.gateway_account_command_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     FOREIGN KEY (tenant_id, account_id)
         REFERENCES public.telegram_accounts(tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (command_id) REFERENCES public.gateway_account_commands(id) ON DELETE CASCADE
+    FOREIGN KEY (tenant_id, account_id, command_id)
+        REFERENCES public.gateway_account_commands(tenant_id, account_id, id) ON DELETE CASCADE
 );
 CREATE INDEX idx_gateway_command_events_command
     ON public.gateway_account_command_events(tenant_id, command_id, id);
