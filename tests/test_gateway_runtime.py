@@ -20,7 +20,8 @@ class Leases:
     def __init__(self):
         self.lease=AccountLease(uuid4(),uuid4(),'test',1)
         self.allowed=True;self.renewed=True;self.calls=[];self.deferred=True
-        self.conn=SimpleNamespace(execute=AsyncMock())
+        self.fenced_leases=[]
+        self.conn=SimpleNamespace(execute=AsyncMock(),fetchval=AsyncMock(return_value=True))
     async def acquire(self,*args):
         self.calls.append('acquire');return self.lease if self.allowed else None
     async def renew(self,*args):
@@ -28,9 +29,14 @@ class Leases:
         if isinstance(self.renewed,Exception):raise self.renewed
         return self.renewed
     async def release(self,*args):self.calls.append('release');return True
-    async def defer(self,*args):self.calls.append('defer');return self.deferred
+    async def defer(self,lease,seconds):
+        self.calls.append('defer')
+        if not self.deferred:return None
+        return AccountLease(lease.tenant_id,lease.account_id,lease.worker_id,lease.fencing_token+1)
     @asynccontextmanager
-    async def fenced_transaction(self,*args):yield self.conn
+    async def fenced_transaction(self,lease):
+        self.fenced_leases.append(lease)
+        yield self.conn
 
 
 async def setup(**options):
@@ -138,6 +144,23 @@ async def test_failed_disconnect_quarantines_current_account_and_does_not_releas
     statements=[call.args[0] for call in leases.conn.execute.await_args_list]
     assert any("PAUSED" in sql for sql in statements)
     assert any("account_security_events" in sql for sql in statements)
+
+
+@pytest.mark.anyio
+async def test_flood_wait_then_disconnect_failure_quarantines_with_rotated_fence():
+    runner,leases,client,_=await setup()
+    client.get_me.side_effect=FloodWaitError(request=None,capture=120)
+    client.disconnect.side_effect=OSError('simulated disconnect uncertainty')
+    with pytest.raises(GatewayCloseUncertain,match='could not be confirmed'):
+        await runner.run(leases.lease.tenant_id,leases.lease.account_id,asyncio.Event())
+    assert 'release' not in leases.calls
+    assert leases.fenced_leases[-1].fencing_token==leases.lease.fencing_token+1
+    statements=[call.args[0] for call in leases.conn.execute.await_args_list]
+    assert any("GATEWAY_CLOSE_UNCERTAIN" in sql for sql in statements)
+    route_updates=[call.args[0] for call in leases.conn.fetchval.await_args_list]
+    assert len(route_updates)==1
+    assert any("account_gateway_routes" in sql and "DISCONNECT_UNCERTAIN" in sql for sql in route_updates)
+    assert any("GATEWAY_ROUTE_PAUSED" in sql for sql in statements)
 
 
 @pytest.mark.anyio
