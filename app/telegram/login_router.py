@@ -68,6 +68,28 @@ def _get_manager(request: Request):
     return request.app.state.telegram_login_manager
 
 
+def _consume_result(account_id, disconnected: bool, activated: bool) -> dict[str, Any]:
+    """Report persisted-account and Gateway-handoff state without implying activation."""
+    if activated:
+        authorization_status = "AUTHORIZED"
+        handoff_status = "COMPLETED"
+        retryable = False
+    elif not disconnected:
+        authorization_status = "PENDING"
+        handoff_status = "AWAITING_DISCONNECT"
+        retryable = True
+    else:
+        authorization_status = "RECOVERY_REQUIRED"
+        handoff_status = "RECOVERY_REQUIRED"
+        retryable = False
+    return {
+        "account_id": str(account_id),
+        "authorization_status": authorization_status,
+        "handoff_status": handoff_status,
+        "retryable": retryable,
+    }
+
+
 def _map_exception(exc: Exception) -> HTTPException:
     if isinstance(exc, LoginThrottled):
         return HTTPException(status_code=429, detail="Login temporarily limited",headers={"Retry-After":str(exc.retry_after)})
@@ -288,10 +310,21 @@ async def consume_login(
             )
 
             if "account_id" in auth_data:
-                if await manager.confirm_disconnected(login_id,str(principal.tenant_id),str(principal.user_id)):
-                    await finish_authorized_account(request.app.state.db_pool,tenant_id=principal.tenant_id,
-                        user_id=principal.user_id,family_id=principal.family_id,account_id=UUID(auth_data["account_id"]))
-                return {"account_id": auth_data["account_id"]}
+                disconnected = await manager.confirm_disconnected(
+                    login_id, str(principal.tenant_id), str(principal.user_id)
+                )
+                activated = False
+                if disconnected:
+                    activated = await finish_authorized_account(
+                        request.app.state.db_pool,
+                        tenant_id=principal.tenant_id,
+                        user_id=principal.user_id,
+                        family_id=principal.family_id,
+                        account_id=UUID(auth_data["account_id"]),
+                    )
+                # A 200 response means the account record exists. Only AUTHORIZED
+                # means the login socket was confirmed closed and the Gateway gate opened.
+                return _consume_result(auth_data["account_id"], disconnected, bool(activated))
 
             if auth_data["notice_version"] != body.notice_version:
                 raise ValueError("Connection notice changed; restart authorization")
@@ -321,13 +354,19 @@ async def consume_login(
                 notice_version=body.notice_version,
             )
 
-            closed=await manager.mark_consumed(
+            disconnected = await manager.mark_consumed(
                 login_id, str(principal.tenant_id), str(principal.user_id), str(account_id)
             )
-            if closed:
-                await finish_authorized_account(pool,tenant_id=principal.tenant_id,user_id=principal.user_id,
-                    family_id=principal.family_id,account_id=account_id)
+            activated = False
+            if disconnected:
+                activated = await finish_authorized_account(
+                    pool,
+                    tenant_id=principal.tenant_id,
+                    user_id=principal.user_id,
+                    family_id=principal.family_id,
+                    account_id=account_id,
+                )
 
-            return {"account_id": str(account_id)}
+            return _consume_result(account_id, disconnected, bool(activated))
     except Exception as exc:
         raise _map_exception(exc)
