@@ -314,3 +314,23 @@ TGMate 根项目已使用 PostgreSQL 迁移和受限 SQL claim functions 管理 
 - 不采纳它的 `reupload`、`restore from disk`、protected-content 下载上传路径。
 - 不采纳它的 UNKNOWN 恢复策略：其 `msg_map` 未持久化每条 operation 的 random_id，重启恢复主要依赖目标端尾部消息形态；TGMate 必须用稳定 random_id + UpdateMessageID/update difference，无法确认时保持 UNKNOWN。
 - 它的 `sync-changes` 是显式增量同步操作，不等同于持续实时 update subscription；TGMate 仍需设计同一 Gateway 内的持久 update capture。
+
+### telemirror 实时同步源码深审补充
+
+[telemirror](https://github.com/khoben/telemirror) 的 `telemirror/mirroring.py` 使用 Telethon 的 NewMessage/Album/Edit/Delete 事件处理器；`storage.py` 提供 PostgreSQL 与 InMemoryDatabase 两种消息映射存储；`messagefilters` 是可配置的过滤器链，方向配置可实现多源多目标和 topic-to-topic 路由。
+
+**可借鉴的概念：**
+- 事件入口按 source peer → 多个 destination peer 分发。
+- 每条源消息分别记录多个目标映射，reply 时通过映射查目标 reply ID。
+- 编辑和删除事件通过映射传播；不同 route 可单独配置是否传播。
+- Filter pipeline 按顺序执行，允许 DISCARD/CONTINUE 和文本/实体变换。
+- Postgres storage 抽象与内存实现分离，便于 FakeGateway/测试替身。
+
+**明确拒绝的部分：**
+- 许可证为 GPL-3.0，不复制代码。
+- `RestrictSavingContentBypassFilter` 明确演示下载受保护媒体、重新上传并替换媒体对象；README 也警告受保护来源可能导致账号封禁。TGMate 不使用该路径，也不使用任何同类绕过过滤器。
+- Session String 通过环境变量注入，示例提示不要用自己的账号；与 TGMate 的加密 Session Vault、租户 RLS 和 Gateway lease/fencing 不匹配。
+- Postgres message map 没有 tenant_id / RLS；异常装饰器记录后吞掉错误，缺少持久失败重试和 UNKNOWN 对账。
+- 事件 handler 直接持有 TelethonClient 并直接发送，不能照搬到 TGMate；必须迁移为 Gateway-owned event capture → durable Inbox → CloneWorker。
+
+**采用决定：** telemirror 是实时 New/Edit/Delete、many-to-many route 和 topic mapping 的概念参考；由于 GPL 和 protected-content bypass 代码，绝不直接移植。TGMate 的实时同步实现应重新编写在自身 Gateway + PostgreSQL RLS 架构内。
