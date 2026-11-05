@@ -384,3 +384,41 @@ TGMate 根项目已使用 PostgreSQL 迁移和受限 SQL claim functions 管理 
 - Playwright 重点测试跨租户访问拒绝、角色权限、暂停/恢复、重复提交、UNKNOWN 结果呈现和关键业务流程。
 
 **选型状态：** 前端框架建议已形成；正式 UI 页面/交互仍依赖 TGM-012 产品 UX 决策。没有创建前端代码或声称前端已开发。
+
+
+## 18. 备份/PITR 与可观测性候选最新核验（2026-11-05）
+
+### PostgreSQL 物理备份与 PITR
+
+本轮直接核对项目官方仓库、许可证与 release：
+
+| 候选 | 最新核验版本 | 许可证 | 能力与取舍 |
+|---|---|---|---|
+| [pgBackRest](https://github.com/pgbackrest/pgbackrest) | v2.60.0，2026-10-18 | MIT | PostgreSQL 专用；full/differential/incremental、并行备份恢复、多 repository、加密、校验和、S3/Azure/GCS/SFTP、WAL archive 与 retention。更贴合 TGMate 当前单一 PostgreSQL 栈。 |
+| [WAL-G](https://github.com/wal-g/wal-g) | v3.0.9，2026-08-20 | Apache-2.0 | Go 工具；PostgreSQL WAL archive、backup-push/fetch、restore/PITR 和多种对象存储，也覆盖其他数据库。适合作为跨数据库/统一备份工具的替代评估。 |
+
+**决策：优先以 pgBackRest 作为 PostgreSQL PITR PoC 候选，WAL-G 保留为备选；不把任一工具的内部源码复制进 Python API。** 采用成熟备份工具作为独立运维组件，减少自研 WAL/恢复协议风险。该选择不代表已经部署或通过恢复验收。
+
+PoC 需要先明确服务器和存储条件，再完成：
+1. 选择本地/POSIX/SFTP 或 S3-compatible repository；不预设 AWS。
+2. 配置 base backup、WAL archive、加密密钥和 retention。
+3. 记录目标 RPO/RTO 与备份窗口、WAL 产生速率、带宽和存储成本。
+4. 在隔离环境执行完整 restore 与 timestamp PITR。
+5. 验证 API readiness、租户 RLS、账本余额/不可变性、加密 Session 数据可读性和业务回归。
+6. 记录实际恢复耗时、恢复点、校验和与失败回滚步骤。
+
+pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page checksum 会停止并要求重新执行恢复；这类 fail-closed 行为应纳入恢复演练和验收，而不是将“备份命令成功”当成“可恢复”。
+
+### OpenTelemetry 与 FastAPI 可观测性
+
+- OpenTelemetry Python API/SDK 与 OTLP HTTP exporter 当前稳定版本核验为 1.45.2（Apache-2.0，2026-10-29 发布）。
+- OpenTelemetry FastAPI contrib instrumentation 当前为 0.66b2，仍标记 Beta；本轮不将 Beta contrib middleware 作为运行时硬依赖。
+- [blueswen/fastapi-observability](https://github.com/Blueswen/fastapi-observability) 为 MIT 示例，演示 OTel traces、Prometheus metrics、Tempo/Loki/Grafana 关联；其 Loki Docker logging plugin、demo 默认账号不适合直接带入 TGMate。
+- 第一阶段采用官方稳定 API/SDK + OTLP HTTP exporter，自建最小 ASGI request middleware；只记录 method、route template、status、service/environment。health probes 排除；不采集 query、body、headers、tenant/account/peer ID 或 exception message。
+- 不自动 instrument asyncpg/Redis，避免 SQL bind values、Redis keys 泄露；等 attribute redaction 审查后再加。
+- 代码 PoC 已在独立 PR [#42](https://github.com/xe4716-svg/Tgsa/pull/42) 开发，目标 PR #27 候选分支。PR #42 的 exact-head CI 仍待完成；内存 exporter 单元测试不能代替真实 Collector 部署。
+- 后续需单独补 worker/Gateway trace context propagation、queue/lease/FloodWait/UNKNOWN 指标、structured log correlation 和 Collector/Tempo/Prometheus/Grafana 部署验收。
+
+### 当前边界
+
+本轮完成候选版本/许可证核验与技术决策；没有配置生产备份、没有运行 PITR restore drill、没有部署 Collector，也没有把示例项目代码复制到产品。目标服务器、对象存储、RPO/RTO 和运维成本仍未确定。
