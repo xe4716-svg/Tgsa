@@ -205,3 +205,70 @@ PR #27 的 `workstreams/tgmate-v2/app/bot_gateway.py` 已有：
 - ADR 是研究设计，不是 migration 或 implementation；产品代码整合仍等待 PR #27/#28 和 TGM-003/004/005 依赖审查。
 
 **当前研究任务进度：55%。** 第一轮源码筛选、Telegram clone 深度审查、Bot API 语义、SaaS/RBAC 候选和 Clone Engine ADR 已有书面交付；部署/监控/备份、商业模块专项研究、完整接口映射、产品代码移植和实网验收仍未完成。
+
+## 13. 部署、备份恢复与可观测性研究
+
+### TGMate 当前实现核对
+
+PR #27 根分支当前已有：
+- `/health/live` 和 `/health/ready`；ready 检查 PostgreSQL、Redis 并在依赖不可用时返回 503。
+- Compose 开发基础栈：PostgreSQL 16、Redis 7、migrate gate、API、billing worker；DB/Redis 不暴露宿主端口，API 绑定 loopback。
+- 可选 Bot/MTProto worker overlay，两个 Telegram 进程使用独立私有 env；Gateway worker 的 restart 设为 no，避免不确定断开后自动重启。
+- `scripts/database_backup.py`：pg_dump custom-format 逻辑备份；restore 只能创建新数据库，不 drop/clean 已有库，pg_restore 使用 single transaction。
+- `scripts/encrypted_backup.py`：AES-256-GCM 流式加密；32-byte 私有 key file、O_NOFOLLOW、0600/0400 权限检查；恢复先完整校验 tag，再创建目标库；临时明文只写私有临时文件并在关闭时清理。
+- 有 `tests/test_database_backup.py` 和 `tests/test_encrypted_backup.py` 覆盖覆盖保护、失败清理、错误 key/tag、临时文件和恢复安全。**本次只读审查，没有执行这些测试。**
+
+部署文档明确说明当前脚本尚未实现 KMS、异地传输、保留策略、自动调度和生产切换；也未取得目标服务器连接配置。Compose 是开发基础栈，不是正式生产上线证明。
+
+### 外部备份候选
+
+| 项目 | 许可证/活跃度证据 | 能力 | TGMate 采用建议 |
+|---|---|---|---|
+| [pgBackRest](https://github.com/pgbackrest/pgbackrest) | GitHub API license field 为 NOASSERTION；2026-11-04 有 push；约 4.4k stars | Full/differential/incremental；WAL archive；加密；backup/restore verification；支持 POSIX、SFTP、S3、GCS、Azure、CIFS；版本化对象存储可按 target time 读取 | **首选物理备份/PITR PoC**；先核验发行包许可证、目标数据库版本、存储和恢复演练；不复制其源码 |
+| [WAL-G](https://github.com/wal-g/wal-g) | GitHub API license field 为 NOASSERTION；2026-11-04 有 push；约 4.3k stars | PostgreSQL 加密/压缩备份、full/incremental、WAL push/fetch、wal-show/wal-verify；支持远程/流式备份 | **备选比较**；重点验证目标存储后端、WAL 完整性、恢复时间和操作复杂度；不复制源码 |
+
+pgBackRest 官方文档列出多种 repository backend 和版本化存储恢复能力：[配置参考](https://pgbackrest.org/configuration.html)、[用户指南](https://pgbackrest.org/user-guide.html)。WAL-G PostgreSQL 文档说明 backup-push/backup-fetch、wal-push/wal-fetch 和 WAL integrity verification：[PostgreSQL guide](https://github.com/wal-g/wal-g/blob/master/docs/PostgreSQL.md)。
+
+**不预设 AWS。** 先按服务器所在地、可用对象存储、带宽、数据库容量、WAL 生成量、恢复时间目标（RTO）和恢复点目标（RPO）测算；可以从 POSIX/SFTP 或 S3-compatible 开始，也可比较 Azure/GCS。未完成实际 restore drill 前不能标记备份验收。
+
+### 可观测性参考
+
+[blueswen/fastapi-observability](https://github.com/Blueswen/fastapi-observability)（MIT；约 1.1k stars；2026-04-12 有 push）展示：
+- OpenTelemetry FastAPI/HTTPX tracing；
+- trace_id/span_id 日志关联；
+- Prometheus metrics + exemplars；
+- Tempo traces、Loki logs、Grafana dashboards；
+- Docker Compose + k6/Locust 压测样例。
+
+它是三套 FastAPI demo 的 observability 示例，不是生产 SaaS。Docker Loki logging driver 需要额外插件，不照搬；TGMate 应优先采用 OTLP collector + structured stdout + Prometheus/Grafana/Loki/Tempo 的可替换部署方式。指标避免 tenant_id、account_id、peer_id 等高基数或敏感 label；将 request_id/trace_id 放日志与 trace，metrics 只保留低基数业务维度。
+
+### 部署/运维采用结论
+
+- 保留 TGMate 现有 health probes、migration gate、私网 DB/Redis、loopback API、独立 worker overlay 和加密逻辑备份。
+- 追加物理备份/PITR 工具评估，不急于替换现有加密逻辑备份。
+- 采用 OpenTelemetry trace context 贯穿 API → Outbox/Worker → Gateway；补充 queue age、lease expiry、FloodWait、UNKNOWN、backup age、restore result 指标。
+- 不引入 Loki Docker plugin 作为强依赖；不把 Grafana 示例密码、默认公开 dashboard 配置带入生产。
+- 目标服务器、对象存储、RPO/RTO 尚未确定，需在容量/成本评估后做部署 PoC。
+
+## 14. 商业模块与任务队列复核
+
+### 商业系统
+
+PR #27 根迁移已有：
+- plan price versioning、tenant wallet accounts、billing orders、wallet ledger entries、subscription terms；
+- payment provider configs、wallet top-up orders、TRON sweep jobs、payment webhook events；
+- renewal intents、tenant notifications、billing email outbox；
+- order idempotency keys、provider/event_id unique constraint、renewal cycle keys、受限 SQL claim/resolve functions。
+
+[yezz123/ai-template](https://github.com/yezz123/ai-template) 的 Stripe subscription/plan limit 适合参考 entitlement 和 SaaS 管理端，但不能替换 TGMate 已确认的 USDT/钱包/动态返佣/支付 provider 业务。当前没有找到足够匹配且许可证/安全性都更合适的完整商业源码。结论：**保留 TGMate 现有商业模型，专项审查 webhook 签名、重复事件、账本不可变性、退款/续费对账，不整体移植第三方支付模块。**
+
+### Worker / queue
+
+TGMate 根项目已使用 PostgreSQL 迁移和受限 SQL claim functions 管理 TRON sweeps、续费 intents、billing emails；PR #28 另建 account Gateway command queue。tgmirror 的 runner/checkpoint 设计可借鉴，但目前没有证据需要再引入 Celery/RQ/独立 Redis broker。结论：先复用 PostgreSQL 持久队列与 Gateway command queue，压测确认吞吐或调度瓶颈后再评估新 broker。
+
+## 15. 更新后的研究状态
+
+- 已完成：Telegram clone 参考源码、Bot API 原生复制语义、SaaS/RBAC 模板、Clone Engine/Gateway ADR、TGMate 现有备份/部署/商业迁移核对。
+- 正在执行：补齐各候选项目版本/许可证/测试证据，完善 TGMate 模块到目录/表/命令的逐项映射。
+- 尚未完成：正式前端选型、备份/PITR PoC、可观测性 PoC、完整接口映射、产品代码移植、TGMate 自动化测试和真实 Telegram 验收。
+- 当前研究/设计完成度：65%。这不是产品代码完成率，也不是上线完成率。
