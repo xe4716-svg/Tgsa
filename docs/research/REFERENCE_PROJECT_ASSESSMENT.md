@@ -334,3 +334,53 @@ TGMate 根项目已使用 PostgreSQL 迁移和受限 SQL claim functions 管理 
 - 事件 handler 直接持有 TelethonClient 并直接发送，不能照搬到 TGMate；必须迁移为 Gateway-owned event capture → durable Inbox → CloneWorker。
 
 **采用决定：** telemirror 是实时 New/Edit/Delete、many-to-many route 和 topic mapping 的概念参考；由于 GPL 和 protected-content bypass 代码，绝不直接移植。TGMate 的实时同步实现应重新编写在自身 Gateway + PostgreSQL RLS 架构内。
+
+## 17. 前端模板专项比较与 TGMate 初步选型
+
+### 候选 A：FastAPI Full Stack Template
+
+[fastapi/full-stack-fastapi-template](https://github.com/fastapi/full-stack-fastapi-template)（MIT）：
+- FastAPI + PostgreSQL 后端；React 19 + TypeScript + Vite 8 前端。
+- Tailwind CSS v4 + shadcn/ui / Radix UI。
+- TanStack Router、TanStack Query、TanStack Table。
+- `@hey-api/openapi-ts` 根据 FastAPI OpenAPI 生成 TypeScript SDK/client。
+- Playwright E2E；Pytest backend；GitHub Actions 覆盖 backend、Docker Compose、Playwright。
+- React SPA 与 FastAPI 同域部署，可通过 Compose/Traefik 自托管。
+
+**可复用：** 前端工程结构、OpenAPI client generator、路由/查询/表格、Playwright E2E、CI 测试门禁、同域反向代理模式。
+
+**不复用：** SQLModel/ORM、JWT 登录、用户模型、CRUD/API routes、Alembic schema、部署 secrets 和默认 auth，因为 TGMate 已有独立数据库模型、PostgreSQL RLS、Session Vault、Gateway 和 worker 部署边界。
+
+### 候选 B：yezz123/ai-template
+
+[yezz123/ai-template](https://github.com/yezz123/ai-template)（MIT）：
+- FastAPI + authx + SQLAlchemy async + PostgreSQL 17 + Redis。
+- 两个独立 Next.js 16 / React 19 应用：tenant-facing frontend 和 super-admin portal。
+- Tailwind v4、Framer Motion、Zod；各自 Vitest + Testing Library。
+- Compose + Nginx 同域入口；backend/frontend/admin 分离 CI。
+- 组织/成员/邀请、API key、audit、feature flags 和 plan limit。
+
+**可复用：** tenant/admin portal 信息架构、组织切换 UX、成员/邀请/API Key 页面、feature flags UI、双 portal 导航结构。
+
+**不复用：** authx/SQLAlchemy/Postgres schema、org_id 应用层隔离、JWT 中 scopes 作为唯一授权依据、Stripe billing、默认 Cookie/CSRF 方案；必须接 TGMate 自己的 API contract/RLS 和认证模型。该模板两个 Next.js 应用增加构建、运行、发布和版本维护面，且仓库未展示与 Full Stack FastAPI Template 同等的 Playwright E2E 路径。
+
+### 初步选择（可执行建议）
+
+**优先以 FastAPI Full Stack Template 的 React/Vite 前端层作为 TGMate UI 起点；从 ai-template 只借鉴租户后台与超级管理员后台的信息架构。**
+
+理由：
+1. TGMate 已经是 FastAPI 后端；OpenAPI 生成 client 可避免前后端重复手写 DTO/API path。
+2. React/Vite 静态产物可由现有 API/反向代理同域服务，避免额外运行两套 Next.js SSR 服务。
+3. 单 SPA 通过 route groups/layouts 区分 tenant app 与 operator/admin；所有权限仍由后端鉴权/RLS 执行，前端隐藏按钮不是安全边界。
+4. Playwright E2E 可直接覆盖登录、租户切换、成员/套餐、频道/账号管理、群发和克隆控制台关键路径。
+5. TGMate 当前没有 frontend 目录；在 TGM-012 UX/页面清单未定稿前，不创建前端代码，不复制模板 backend。
+
+### 需要在 TGM-012 明确的页面边界
+
+- Tenant：登录/账户、组织与成员、套餐/账单/钱包、Telegram 账号与授权、代理、频道路由/克隆、Bot/群发、任务历史/审计。
+- Operator/Super Admin：租户检索与状态、套餐/权益配置、支付渠道与回调审计、Gateway/Worker 状态、全局任务/错误/安全事件。
+- 所有写操作经 TGMate API，tenant_id 不由浏览器作为可信输入；后端从认证上下文确定租户并执行 RLS。
+- OpenAPI schema 是前端 client 的唯一生成来源；禁止手工维护第二份 API 类型。
+- Playwright 重点测试跨租户访问拒绝、角色权限、暂停/恢复、重复提交、UNKNOWN 结果呈现和关键业务流程。
+
+**选型状态：** 前端框架建议已形成；正式 UI 页面/交互仍依赖 TGM-012 产品 UX 决策。没有创建前端代码或声称前端已开发。
