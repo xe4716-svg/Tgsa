@@ -78,21 +78,21 @@ class GatewayLeases:
                 lease.tenant_id,lease.account_id,lease.worker_id,lease.fencing_token))
 
     async def defer(self,lease,seconds):
-        """Persist a server wait in the existing ownership deadline."""
+        """Persist the wait and return the new fenced lease for cleanup only."""
         if type(seconds) is not int or not 1<=seconds<=2147483647:
             raise ValueError('Invalid server wait')
         async with self._transaction(lease.tenant_id,lease.account_id) as (conn,allowed):
-            if not allowed:return False
+            if not allowed:return None
             held=await conn.fetchval('''UPDATE account_gateway_leases
                 SET fencing_token=fencing_token+1,
                     lease_expires_at=GREATEST(lease_expires_at,clock_timestamp()+$5*interval '1 second'),updated_at=clock_timestamp()
                 WHERE tenant_id=$1 AND account_id=$2 AND worker_id=$3 AND fencing_token=$4
-                  AND lease_expires_at>clock_timestamp() RETURNING true''',
+                  AND lease_expires_at>clock_timestamp() RETURNING fencing_token''',
                 lease.tenant_id,lease.account_id,lease.worker_id,lease.fencing_token,seconds)
             if held:
                 await conn.execute("INSERT INTO account_security_events(tenant_id,account_id,event_type,severity,details) VALUES($1,$2,'MTPROTO_FLOOD_WAIT','WARNING',jsonb_build_object('retry_after',$3::integer))",lease.tenant_id,lease.account_id,seconds)
                 await conn.execute("INSERT INTO audit_logs(tenant_id,action,resource_type,resource_id,details) VALUES($1,'GATEWAY_SERVER_WAIT','telegram_account',$2,jsonb_build_object('retry_after',$3::integer))",lease.tenant_id,lease.account_id,seconds)
-            return bool(held)
+            return AccountLease(lease.tenant_id,lease.account_id,lease.worker_id,held) if held else None
 
     @asynccontextmanager
     async def fenced_transaction(self, lease):

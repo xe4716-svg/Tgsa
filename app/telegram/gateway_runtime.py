@@ -143,7 +143,9 @@ class GatewayRunner:
             if lease is not None:
                 try:
                     held=await asyncio.wait_for(self.leases.defer(lease,max(1,exc.seconds)),self.control_timeout)
-                    if held:return GatewayResult('FLOOD_WAIT',max(1,exc.seconds))
+                    if held:
+                        lease=held
+                        return GatewayResult('FLOOD_WAIT',max(1,exc.seconds))
                 except Exception:
                     pass
             return GatewayResult('WAIT_PERSIST_FAILED',max(1,exc.seconds))
