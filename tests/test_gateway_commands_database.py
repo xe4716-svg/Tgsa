@@ -11,6 +11,7 @@ import asyncpg
 import psycopg
 from psycopg import sql
 import pytest
+from telethon.errors import FloodWaitError
 
 from app.telegram.gateway_command_store import GatewayCommandStore
 
@@ -95,15 +96,56 @@ def test_command_roles_mapping_fencing_recovery():
                         assert completed_result.completed_at is not None
                         assert not await e.finish(*args,'succeeded',remote_message_id=10)
                         # Exercise real SQL transitions through the executor with a fake RPC.
-                        from app.telegram.gateway_command_executor import GatewayCommandExecutor
+                        from app.telegram.gateway_command_executor import GatewayCommandExecutor, GatewayPreflightRejected
                         from app.telegram.gateway_leases import AccountLease
                         from unittest.mock import AsyncMock
                         synthetic=await s.submit_text(business,account,1,uuid4(),123,'fake rpc')
+                        preflight=AsyncMock(return_value=object())
                         sender=AsyncMock(return_value=22)
                         async def controlled(operation,timeout): return await asyncio.wait_for(operation(),timeout)
-                        assert await GatewayCommandExecutor(e,sender).execute_one(AccountLease(tenant,account,'gateway-test',7),1,object(),controlled,2)
+                        assert await GatewayCommandExecutor(e,preflight,sender).execute_one(AccountLease(tenant,account,'gateway-test',7),1,object(),controlled,2)
                         assert owner.execute('SELECT status FROM gateway_account_commands WHERE id=%s',(synthetic,)).fetchone()[0]=='succeeded'
+                        preflight.assert_awaited_once()
                         sender.assert_awaited_once()
+
+                        # A deterministic preflight rejection is terminal but known
+                        # not delivered: no dispatch marker and no sender call.
+                        rejected_id=await s.submit_text(business,account,1,uuid4(),123,'rejected by preflight')
+                        reject_preflight=AsyncMock(side_effect=GatewayPreflightRejected('DESTINATION_FORBIDDEN'))
+                        reject_sender=AsyncMock(return_value=23)
+                        assert await GatewayCommandExecutor(e,reject_preflight,reject_sender).execute_one(
+                            AccountLease(tenant,account,'gateway-test',7),1,object(),controlled,2)
+                        rejected_state=owner.execute(
+                            'SELECT status,dispatch_started_at,error_code FROM gateway_account_commands WHERE id=%s',
+                            (rejected_id,),
+                        ).fetchone()
+                        assert rejected_state==('rejected',None,'DESTINATION_FORBIDDEN')
+                        reject_preflight.assert_awaited_once()
+                        reject_sender.assert_not_awaited()
+
+                        # A preflight FloodWait is persisted without crossing the
+                        # dispatch boundary; after the wait it can be safely requeued.
+                        preflight_wait_id=await s.submit_text(business,account,1,uuid4(),123,'preflight flood wait')
+                        wait_preflight=AsyncMock(side_effect=FloodWaitError(request=None,capture=120))
+                        wait_sender=AsyncMock(return_value=24)
+                        with pytest.raises(FloodWaitError):
+                            await GatewayCommandExecutor(e,wait_preflight,wait_sender).execute_one(
+                                AccountLease(tenant,account,'gateway-test',7),1,object(),controlled,2)
+                        wait_state=owner.execute(
+                            'SELECT status,dispatch_started_at,available_at>now() FROM gateway_account_commands WHERE id=%s',
+                            (preflight_wait_id,),
+                        ).fetchone()
+                        assert wait_state==('flood_wait',None,True)
+                        wait_preflight.assert_awaited_once()
+                        wait_sender.assert_not_awaited()
+                        owner.execute(
+                            "UPDATE gateway_account_commands SET available_at=now()-interval '1 second' WHERE id=%s",
+                            (preflight_wait_id,),
+                        )
+                        assert await e.requeue_flood_wait(tenant,account,'gateway-test',7)==1
+                        assert (await e.claim_next(tenant,account,'gateway-test',7)).id==preflight_wait_id
+                        assert await e.mark_dispatch_started(tenant,preflight_wait_id,'gateway-test',7)
+                        assert await e.finish(tenant,preflight_wait_id,'gateway-test',7,'succeeded',remote_message_id=24)
                         # FloodWait is a known non-delivery result: hold the command
                         # until retry_after, then clear the old dispatch marker and
                         # allow exactly one new fenced claim.
