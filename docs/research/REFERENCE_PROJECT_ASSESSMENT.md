@@ -110,3 +110,79 @@ Tgsa 主仓库已有 FastAPI、PostgreSQL、Redis、租户/RLS、认证、加密
 5. 每个被选中的实现建立独立分支/PR，并运行数据库、并发、故障恢复和 Telegram sandbox 测试。
 
 **本报告状态：第一轮研究成果。未移植产品代码；未在本轮运行 TGMate 测试；未进行真实 Telegram 发送或生产部署。**
+
+
+## 8. 第二轮 SaaS / 多租户源码候选
+
+### 首选 SaaS 参考：yezz123/ai-template
+
+[仓库](https://github.com/yezz123/ai-template)；MIT；GitHub 元数据 258 stars / 41 forks；本次核验 main commit `3a98f05087ae03ce0ae5570bf8ecc0e4def54bda`（2026-09-19）。项目说明包含 FastAPI + AuthX + SQLAlchemy async + Alembic + PostgreSQL + Redis，以及 Next.js tenant app 和独立 super-admin portal。
+
+**值得借鉴：**
+- Organizations / memberships / invitations；Owner/Admin/Member 角色和 scope 映射。
+- 切换 organization 时重新签发带 org_id、role、scopes 的 token。
+- 邀请 token 只保存 SHA-256 hash，并有过期时间。
+- API key 使用随机 secret，数据库只保存完整 key 的 SHA-256 hash 和 prefix；明文只在创建时返回一次。
+- API key 请求的 scopes 必须是创建者自身 scopes 的子集，防止提权。
+- 每租户 API key、audit log、plan limits、rate limiting、feature flags。
+- 独立 tenant frontend 和 super-admin portal；有 organizations/RBAC/API keys/audit/billing 的集成测试文件和 backend/frontend/admin 三条 CI workflow。
+
+**不能原样采用：**
+- 它的租户隔离主要依赖 shared-schema 中的 org_id 和应用层 repository filter；TGMate 必须保留 PostgreSQL RLS/FORCE RLS，不能降级。
+- role/scopes 放在 JWT claim 中；需额外验证角色变更、成员移除和 token 撤销是否即时生效。
+- AuditLogMiddleware 在响应成功后单独写入，并吞掉写入异常；TGMate 关键审计事件必须确保事务一致性或持久化重试，不能静默丢失。
+- SQLAlchemy ORM 与 TGMate 当前 asyncpg/SQL 迁移体系不同；不替换现有数据层。
+- Stripe 订阅不能替代 TGMate 已确认的钱包、支付、动态返佣业务。
+
+**采用决定：** 作为 SaaS 多租户、邀请、scope/API key、feature flag、管理端和测试矩阵的首选设计参考；仅摘取明确可适配的逻辑，保持 TGMate RLS、现有认证和商业模型。
+
+### 其他 SaaS 候选排除
+- [TinDang97/fastapi-multi-tenant](https://github.com/TinDang97/fastapi-multi-tenant)：Apache-2.0，但 SQLite-per-tenant，与 TGMate PostgreSQL RLS 不匹配，规模/活跃度证据有限，仅作 Clean Architecture 对照。
+- [jeraldoalday/saas-starter-kit](https://github.com/jeraldoalday/saas-starter-kit)：GitHub 未识别许可证（NOASSERTION）、0 stars；不复制代码。
+- [PythonCharmers/fastapi-saas-starter](https://github.com/PythonCharmers/fastapi-saas-starter)：0 stars、未发现明确许可证；不复制代码。
+- 这些新发现不能证明它们就是历史研究记录中提到的那个“SaaS Starter Kit”；原始历史仓库身份仍待通过旧对话/工程证据定位。
+
+## 9. Bot API 原生消息复制研究
+
+官方 [Telegram Bot API](https://core.telegram.org/bots/api#forwardmessages) 定义了：
+- `forwardMessage` / `forwardMessages`：原生转发；`forwardMessages` 接收 1–100 个严格递增的 message IDs；相册分组保持；受保护内容不能转发。
+- `copyMessage` / `copyMessages`：复制消息但不带原消息链接；`copyMessages` 同样接收 1–100 个严格递增 IDs，保持相册分组；`copyMessage` 可在不上传媒体字节的情况下替换 caption。
+- 不支持复制的类型包括 service messages、paid media、giveaway、giveaway winners 和 invoices；poll 还受 correct_option_ids 条件限制。
+
+TGMate 约束：即使 Bot API 暴露 copy 方法，也不尝试绕过来源的 protected-content 标记；受保护或权限未知时 fail closed。Bot API 的 forward/copy 方法没有 MTProto 的 `random_id` 参数，因此 Outbox idempotency key 只能保护 TGMate 内部任务创建/调度，不能保证 Telegram 端 exactly-once。网络超时且结果未知时必须标记 UNKNOWN 并停止该目标的自动重发；只有明确失败或可核验成功时才能推进。
+
+### TGMate 当前 Bot 代码对照
+PR #27 的 `workstreams/tgmate-v2/app/bot_gateway.py` 已有：
+- webhook secret 验证和 active bot 检查；
+- 按 tenant + bot + update_id 的 inbox 去重；
+- payload hash 冲突检测；
+- ingress 与领域队列同事务提交。
+
+同分支 `broadcast.py` 已有：
+- text-only immutable plan；
+- 目标数量校验；
+- bot/account 两种独立执行通道；
+- Outbox dispatch 和 run/target snapshot；
+- fresh preflight 前不允许发送。
+
+当前代码尚未实现 Bot API 的 `copyMessage/copyMessages/forwardMessage/forwardMessages` 媒体转发路径。后续应新增 Bot Gateway 原生 copy/forward adapter，按 message_id 逐条持久化结果；对 Bot API 无法提供 server-side idempotency 的 UNKNOWN 情况采用 fail-closed，而不是盲目重发。
+
+## 10. 第二轮模块决策更新
+
+| 模块 | 首选参考 | 采用方式 | 优先级 |
+|---|---|---|---|
+| MTProto 克隆 Engine / Store | tgmirror | 重实现 Gateway/Engine/Store、pair cursor、pending batch、album Unit、topic map；PostgreSQL + RLS | P0 |
+| MTProto 原生转发可靠性 | Telegram 官方 MTProto docs | raw ForwardMessagesRequest + 持久 random_id + UpdateMessageID 对账；UNKNOWN 停止自动重发 | P0 |
+| Bot API 媒体复制 | Telegram Bot API | copyMessages/forwardMessages 原生方法；保持 album；Bot API UNKNOWN fail-closed | P1 |
+| SaaS 组织 / RBAC / API keys | yezz123/ai-template | 借鉴组织成员、scope、邀请 token hash、API key hash + scope subset；保留 TGMate RLS | P1 |
+| 前端 / 管理端 / E2E | FastAPI Full Stack Template + ai-template | 比较后择一，不同时引入两套前端架构；保留 OpenAPI client 和 E2E 思路 | P1 |
+| 内容过滤插件 | tgcf | 只借鉴纯函数 filter/transform 插件接口；持久状态不放内存 | P2 |
+| 商业/支付/返佣 | 暂无合适整体候选 | 保留 TGMate 现有业务模型，后续只对账单、webhook、entitlement 细节做专项比较 | P1 |
+| Worker / queue | tgmirror + TGMate Outbox | 借鉴 runner/checkpoint；不另加 Celery/Redis broker，先复用 PostgreSQL Outbox/Gateway queue | P0 |
+
+## 11. 更新后的状态
+
+- 已完成：Telegram clone 首轮审查；tgmirror 深度审查；Bot API 官方方法核对；SaaS 多租户候选首轮审查；GitHub 文档 PR #30。
+- 正在执行：部署/监控/备份候选项目与商业模块专项对照；把上表细化到 TGMate 目标目录、数据库表和 Gateway 命令。
+- 尚未完成：完整模块映射、真实 Telegram PoC、产品代码移植、TGMate 自动化测试和生产验收。
+- 研究任务进度：50%（研究文档和首轮模块选型进度；不是产品代码或上线完成率）。
