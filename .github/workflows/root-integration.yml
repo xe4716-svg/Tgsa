@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17.11
+        image: postgres:17.11@sha256:653186fe15006c099d2fb3bc1d8461c1dee9d036c43f2e5fdaf4f22e5e601876
         env:
           POSTGRES_PASSWORD: integration-test-only
           POSTGRES_DB: tgmate_ci
@@ -91,11 +91,12 @@ jobs:
         run: docker image inspect tgmate-ci --format 'API image ID={{.Id}}'
       - name: Record PostgreSQL service and image client package versions
         run: |
-          docker pull postgres:17.11
-          docker image inspect postgres:17.11 --format 'Root PostgreSQL service={{json .RepoDigests}}'
-          docker pull postgres:16.15
-          docker image inspect postgres:16.15 --format 'V2 PostgreSQL service={{json .RepoDigests}}'
-          docker run --rm tgmate-ci dpkg-query -W -f='${Package}=${Version}\n' postgresql-client postgresql-client-18
+          docker pull 'postgres:17.11@sha256:653186fe15006c099d2fb3bc1d8461c1dee9d036c43f2e5fdaf4f22e5e601876'
+          docker image inspect 'postgres:17.11@sha256:653186fe15006c099d2fb3bc1d8461c1dee9d036c43f2e5fdaf4f22e5e601876' --format 'Root PostgreSQL service={{json .RepoDigests}}'
+          docker pull 'postgres:16.15@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32'
+          docker image inspect 'postgres:16.15@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32' --format 'V2 PostgreSQL service={{json .RepoDigests}}'
+          docker run --rm tgmate-ci psql --version
+          docker run --rm tgmate-ci dpkg-query -W -f='${Package}=${Version}\n' postgresql-client postgresql-client-17
       - name: Verify isolated Compose startup and migration replay
         run: python3 scripts/container_smoke.py
       - name: Record pinned Compose image digests
@@ -109,7 +110,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16.15
+        image: postgres:16.15@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32
         env:
           POSTGRES_PASSWORD: integration-test-only
         ports: ['5432:5432']
