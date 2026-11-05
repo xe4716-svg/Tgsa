@@ -21,7 +21,7 @@
 
 | 项目 | 许可证 / 技术 | 有价值的设计 | 不采用的部分 / 风险 | 结论 |
 |---|---|---|---|---|
-| [tgmirror](https://github.com/tamvcspk/tgmirror) | MIT；Telethon 1.45.0；SQLite；Typer/Rich | Gateway protocol、纯 Engine、Store 边界；每个源/目标 pair 的 cursor；msg_map；pending batch 写前记录；单事务推进 cursor；album Unit 不拆分；forum topic map；FloodWait/暂停/恢复 | 单账号 CLI + SQLite；策略含 reupload；引用过期后会回退下载/上传；普通路径用 Telethon 高层 forward helper；pending 恢复以目标尾部消息数量/媒体类型/相册形态作启发式判断，空尾部或模糊情况可能重新发送；不能满足 TGMate 的强 UNKNOWN 对账要求 | **首选架构参考，不直接移植** |
+| [tgmirror](https://github.com/tamvcspk/tgmirror) | MIT；Telethon 1.45.0；SQLite；Typer/Rich；v0.3.0（2026-10-24） | Gateway protocol、纯 Engine、Store；pair cursor/msg_map；pending batch 写前记录；album Unit；forum topic map；FloodWait/暂停/恢复；历史 clone/delta；手动 sync-changes；edit/delete/repost/topic 操作；backup/restore；TUI/Docker | 单账号 CLI + SQLite，无 SaaS/RLS；没有持续实时事件流；策略含 download/reupload/restore；引用过期后会回退下载上传；Store 不持久化 random_id；pending 恢复使用目标尾部形态启发式，可能重新发送；不满足 TGMate 的强 UNKNOWN 对账要求 | **最强克隆架构参考，不直接移植** |
 | [telegram-forwarder](https://github.com/apppurchasespro-hash/telegram-forwarder) | MIT；Telethon；Quart | 流式历史遍历；最多 100 条原生转发批次；源→目标映射；编辑/删除传播；pair lock；暂停开关；论坛 topic 转发 | 对 protected source 有 download/re-upload copy-mode；raw ForwardMessagesRequest 每次重新生成 random_id；部分失败批次会推进水位；JSON 文件状态不是多进程/多租户数据库；Web Basic Auth 在未配置密码时关闭 | **只研究原生路径和事件映射** |
 | [Telegram Channel Clone Theta](https://github.com/MR-PR0G/Telegram-channel-cloner) | MIT；Telethon；Python 3.12+ | 传递现有 message.media；grouped_id 相册聚合；按消息 ID 正序分页；进度和失败记录；reply mapping 概念 | send helper 对通用异常重试，未处理响应丢失导致的 SEND_UNKNOWN；失败后仍可能推进进度；映射主要在内存；CLI 单账号 | **借鉴媒体/相册/分页，不照搬重试和状态** |
 | [tgcf](https://github.com/aahnik/tgcf) | MIT；Telethon；最后推送 2024-05-06 | past/live 分离；事件式 New/Edit/Delete；插件化 filter/format/replace/caption；配置驱动 | live message map 是进程内字典；past async 路径使用阻塞 sleep；sender plugin 通过 get_file 处理媒体；项目维护活跃度偏低 | **仅借鉴纯过滤插件接口和事件模型** |
@@ -34,10 +34,12 @@
 
 ### tgmirror 版本与验证边界
 
-- 本次读取的 GitHub main commit：`db8c1128572e683e8692ada09faae06a8959cb90`（2026-10-24）。
-- 当前仓库 `pyproject.toml` 标记版本 0.3.0；PyPI 页面列出的发行版为 0.1.1（2026-09-28），两者不能混为同一发布工件。
-- 仓库测试树包含 96 个 unit 文件和 22 个 integration 文件；测试使用 FakeGateway/本地 SQLite，不等于真实 Telegram 全路径验收。
-- PyPI 项目说明明确列出部分论坛、keyring、备份/恢复、发布流程阶段只通过 fake 测试，尚未真实账号端到端验证。
+- 本次读取的 GitHub main commit：`db8c1128572e683e8692ada09faae06a8959cb90`；GitHub Release `v0.3.0` 于 2026-10-24 发布，wheel/sdist、Docker 和 PyPI 发布作业成功；可选的 WinGet 提交作业失败，不影响核心发布。
+- PyPI 搜索页的旧索引仍显示 `0.1.1`（2026-09-28），与 GitHub v0.3.0 release 不一致；本次以 GitHub tag/release artifacts 和 main commit 为当前源码依据，不把旧索引当最新版本。
+- GitHub Actions：main CI 在该 commit 成功；release workflow 中 PyPI 与 Docker job 成功，WinGet job 失败。
+- 仓库测试树包含 96 个 unit 文件和 22 个 integration 文件；README 的测试命令使用 FakeGateway/本地 SQLite，因此 CI 通过不等于所有 Telegram 路径都做了实网验证。
+- README/roadmap 记录 v0.3.0 的 clone/delta、sync-changes、edit/delete、topic 操作等主要能力已在真实账号上试过；新菜单入口仅有测试覆盖。仍有未实测边界：`inspect --quick`、自适应 rate-limit 部分、非 forum 来源 forward 到 forum topic、album forward 到 topic 等。
+- v0.3.0 的 `--keep-replies`、`--mode reupload`、backup/restore 会在特定路径重新发送或下载/上传媒体；这些路径不符合 TGMate 的无下载/无上传约束，必须排除。
 
 ## 3. Telegram 原生转发的关键技术判断
 
@@ -300,3 +302,15 @@ TGMate 根项目已使用 PostgreSQL 迁移和受限 SQL claim functions 管理 
 3. 以 TGMate 自己的 RLS、Gateway lease/fencing、持久 command queue 和审计模式作为安全/运行边界。
 4. SaaS 的 API key/invitation/scope 参考 ai-template；前端在 TGM-012 UX 确认后只选一个模板路线。
 5. 备份继续保留 AES-GCM 逻辑备份；通过 pgBackRest/WAL-G 对照确定 PITR 方案；可观测性先补 OTel trace/metrics，不引入不必要的消息 broker。
+
+
+### tgmirror v0.3.0 的实网验证补充（2026-11-05）
+
+本次对照 GitHub README、roadmap 和 `docs/07-inspect-transform.md`，修正了此前仅依据 PyPI 页面得到的过时版本判断。v0.3.0 不只是一个基础历史克隆 CLI：它已有手动 delta、sync-changes（编辑/删除同步）、topic 操作、备份恢复、filter/transform、TUI 和 Docker。主要 clone/change/topic 功能有真实账号试用记录；但测试套件本身仍使用 FakeGateway，且 README 明确列出若干未实测边界。
+
+对 TGMate 的新结论：
+- tgmirror 是当前首选的**克隆业务流程和持久化状态模型**参考，优先级高于早期简单克隆脚本。
+- 可以进一步研究它的 `sync-changes`、`edit`、`delete`、topic map 和 preflight/confirmation plan。
+- 不采纳它的 `reupload`、`restore from disk`、protected-content 下载上传路径。
+- 不采纳它的 UNKNOWN 恢复策略：其 `msg_map` 未持久化每条 operation 的 random_id，重启恢复主要依赖目标端尾部消息形态；TGMate 必须用稳定 random_id + UpdateMessageID/update difference，无法确认时保持 UNKNOWN。
+- 它的 `sync-changes` 是显式增量同步操作，不等同于持续实时 update subscription；TGMate 仍需设计同一 Gateway 内的持久 update capture。
