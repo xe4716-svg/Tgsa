@@ -57,6 +57,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
           psql --version
           pg_dump --version
           dpkg-query -W -f='postgresql-client-17 package=${Version}\n' postgresql-client-17
@@ -65,7 +66,8 @@ jobs:
           python --version
           psql --version
           psql -h localhost -U postgres -d tgmate_ci -Atqc 'SHOW server_version'
-          client_major="$(pg_dump --version | sed -E 's/.* ([0-9]+)\\..*/\\1/')"
+          client_version="$(pg_dump --version | awk '{print $3}')"
+          client_major="${client_version%%.*}"
           server_major="$(( $(psql -h localhost -U postgres -d tgmate_ci -Atqc 'SHOW server_version_num') / 10000 ))"
           test "$client_major" -ge "$server_major"
       - name: Root tests and fresh database migration lifecycle
@@ -144,6 +146,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
           psql --version
           pg_dump --version
           dpkg-query -W -f='postgresql-client-17 package=${Version}\n' postgresql-client-17
@@ -152,7 +155,8 @@ jobs:
           python --version
           psql --version
           psql -h localhost -U postgres -d postgres -Atqc 'SHOW server_version'
-          client_major="$(pg_dump --version | sed -E 's/.* ([0-9]+)\\..*/\\1/')"
+          client_version="$(pg_dump --version | awk '{print $3}')"
+          client_major="${client_version%%.*}"
           server_major="$(( $(psql -h localhost -U postgres -d postgres -Atqc 'SHOW server_version_num') / 10000 ))"
           test "$client_major" -ge "$server_major"
       - name: Run preserved business tests after forward safety migrations
