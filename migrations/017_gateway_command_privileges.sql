@@ -286,7 +286,7 @@ CREATE FUNCTION public.requeue_ready_gateway_account_flood_wait(
 ) RETURNS INTEGER
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public
-AS $
+AS $flood_wait$
 DECLARE v_tenant UUID; v_count INTEGER := 0;
 BEGIN
     v_tenant := public.authorize_gateway_command('execute');
@@ -330,7 +330,7 @@ BEGIN
     SELECT count(*)::integer INTO v_count FROM requeued;
     RETURN COALESCE(v_count,0);
 END;
-$;
+$flood_wait$;
 
 ALTER FUNCTION public.requeue_ready_gateway_account_flood_wait(UUID,TEXT,BIGINT) OWNER TO tgs_command_owner;
 REVOKE ALL ON FUNCTION public.requeue_ready_gateway_account_flood_wait(UUID,TEXT,BIGINT) FROM PUBLIC,tgs_runtime;
