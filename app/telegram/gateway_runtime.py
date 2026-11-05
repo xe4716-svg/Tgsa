@@ -152,15 +152,20 @@ class GatewayRunner:
             # Keep ownership unavailable through the server-mandated wait. Never
             # release this deadline in finally or automatically reconnect.
             release=False
-            lost.set()
             if monitor:
                 monitor.cancel()
                 await asyncio.gather(monitor,return_exceptions=True)
                 monitor=None
             if lease is not None:
                 try:
-                    held=await asyncio.wait_for(self.leases.defer(lease,max(1,exc.seconds)),self.control_timeout)
-                    if held:return GatewayResult('FLOOD_WAIT',max(1,exc.seconds))
+                    deferred=await asyncio.wait_for(
+                        self.leases.defer(lease,max(self.ttl,1,exc.seconds)),self.control_timeout)
+                    if deferred is not None:
+                        # defer() increments the durable fencing token. Adopt the
+                        # returned lease so a failed disconnect can still quarantine
+                        # this account with the current owner token.
+                        lease=deferred
+                        return GatewayResult('FLOOD_WAIT',max(1,exc.seconds))
                 except Exception:
                     pass
             return GatewayResult('WAIT_PERSIST_FAILED',max(1,exc.seconds))
@@ -194,6 +199,16 @@ class GatewayRunner:
                         await conn.execute("UPDATE telegram_accounts SET status='PAUSED',security_state='GATEWAY_CLOSE_UNCERTAIN' WHERE tenant_id=$1 AND id=$2",lease.tenant_id,lease.account_id)
                         await conn.execute("INSERT INTO audit_logs(tenant_id,action,resource_type,resource_id,details) VALUES($1,'GATEWAY_DISCONNECT_UNCERTAIN','telegram_account',$2,'{}'::jsonb)",lease.tenant_id,lease.account_id)
                         await conn.execute("INSERT INTO account_security_events(tenant_id,account_id,event_type,severity) VALUES($1,$2,'GATEWAY_CLOSE_UNCERTAIN','CRITICAL')",lease.tenant_id,lease.account_id)
+                        route_changed=await conn.fetchval("""UPDATE account_gateway_routes
+                            SET enabled=false,generation=generation+1,last_reason='DISCONNECT_UNCERTAIN',
+                                updated_at=clock_timestamp()
+                            WHERE tenant_id=$1 AND account_id=$2 AND enabled RETURNING true""",
+                            lease.tenant_id,lease.account_id)
+                        if route_changed:
+                            await conn.execute("""INSERT INTO audit_logs(tenant_id,action,resource_type,resource_id,details)
+                                VALUES($1,'GATEWAY_ROUTE_PAUSED','telegram_account',$2,
+                                       jsonb_build_object('reason','DISCONNECT_UNCERTAIN'))""",
+                                lease.tenant_id,lease.account_id)
                 try:
                     await asyncio.wait_for(quarantine(),self.control_timeout)
                 except Exception:
