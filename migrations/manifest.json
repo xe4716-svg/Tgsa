@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "name": "001_core.sql",
+      "sha256": "bdb123a6890b2f45d8db3ce4b921306c8752f7fa1251036d58dd21e16d86132f"
+    },
+    {
+      "name": "002_rls.sql",
+      "sha256": "82989479dbcb2cbaa40b77efd1f8197cffa2077ec8a73eead1cad1189f2b9561"
+    },
+    {
+      "name": "003_auth.sql",
+      "sha256": "599c126acad080e628c20ccb56fa3333caab79fe139a54dcb0bc6713453fee96"
+    },
+    {
+      "name": "004_membership.sql",
+      "sha256": "444da250c887fe9c30308aa77691865f8b6a757212c0ab7676f962cfc1adbb6a"
+    },
+    {
+      "name": "005_entitlement_overrides.sql",
+      "sha256": "28e346d1503ae3b639fd196b8b42c95b2d8606d62bea41db4faf03b7233c986c"
+    },
+    {
+      "name": "006_wallet_commerce.sql",
+      "sha256": "954e9a527f547f8eca0a56b8fd36bce27c8584994267e77572d250463a17a876"
+    },
+    {
+      "name": "007_payment_orchestration.sql",
+      "sha256": "6771c7085ffec7822a2f3b59274c5bde8f1bb1c7b87aaa71c3e93f618721798f"
+    },
+    {
+      "name": "008_auto_renewal.sql",
+      "sha256": "3c59b77c0ad66bff9e8220fd5918e96d2dc9a5faaec3b4438c3e290253dca128"
+    },
+    {
+      "name": "009_telegram_notifications.sql",
+      "sha256": "b22133f9002d7cbf766c1e4008da6a5d60ecb88019d767104eee59e84ea32c00"
+    },
+    {
+      "name": "010_identity_bridge.sql",
+      "sha256": "af778cfacdacd5c36a8f44b7cc976618df7c32c72e0e08c08e6ff63d8cc195eb"
+    },
+    {
+      "name": "011_gateway_routes.sql",
+      "sha256": "86cdaa897b826955ab12a5315af82b9a5e6e7e595ae843ee18a6ec541d38fed5"
+    },
+    {
+      "name": "012_business_worker_guard.sql",
+      "sha256": "7961ea66982dc8b861583934749f6cbbc21e1b61ebbdf6b6c2c139a7385ccd00"
+    }
+  ]
+}
