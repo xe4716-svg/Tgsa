@@ -10,11 +10,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17.11
+        image: postgres:17.11@sha256:653186fe15006c099d2fb3bc1d8461c1dee9d036c43f2e5fdaf4f22e5e601876
         env:
           POSTGRES_PASSWORD: integration-test-only
           POSTGRES_DB: tgmate_ci
@@ -40,18 +40,20 @@ jobs:
       TGMATE_CATALOG_INTEGRATION: '1'
       TGMATE_SCHEMA_ADOPTION_INTEGRATION: '1'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.11.17'
       - run: python -m pip install --require-hashes -r requirements.lock
       - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client=18+290ubuntu1 postgresql-client-18=18.6-1.pgdg26.04+2
       - name: Record Python and PostgreSQL versions
         run: |
           python --version
+          dpkg-query -W -f='${Package}=${Version}\n' postgresql-client postgresql-client-18
+          test "$(psql --version)" = 'psql (PostgreSQL) 18.6 (Ubuntu 18.6-1.pgdg26.04+2)'
           psql --version
           psql -h localhost -U postgres -d tgmate_ci -Atqc 'SHOW server_version'
       - name: Root tests and fresh database migration lifecycle
@@ -66,14 +68,17 @@ jobs:
         run: python -m pytest tests/test_billing_automation.py tests/test_login_persistence_database.py tests/test_bot_database.py -q --junitxml=notification-login-results.xml
 
   container:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Record Docker and Compose versions
         run: |
+          test "$(docker version --format '{{.Client.Version}}')" = '29.4.2'
+          test "$(docker version --format '{{.Server.Version}}')" = '29.4.2'
+          test "$(docker compose version --short)" = '5.1.3'
           docker version --format 'Docker client {{.Client.Version}} / server {{.Server.Version}}'
           docker compose version
       - name: Build API and worker image
@@ -84,6 +89,18 @@ jobs:
         run: docker run --rm tgmate-ci python --version
       - name: Record API image build ID
         run: docker image inspect tgmate-ci --format 'API image ID={{.Id}}'
+      - name: Record PostgreSQL service and image client package versions
+        run: |
+          docker pull 'postgres:17.11@sha256:653186fe15006c099d2fb3bc1d8461c1dee9d036c43f2e5fdaf4f22e5e601876'
+          docker image inspect 'postgres:17.11@sha256:653186fe15006c099d2fb3bc1d8461c1dee9d036c43f2e5fdaf4f22e5e601876' --format 'Root PostgreSQL service={{json .RepoDigests}}'
+          docker pull 'postgres:16.15@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32'
+          docker image inspect 'postgres:16.15@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32' --format 'V2 PostgreSQL service={{json .RepoDigests}}'
+          api_psql_version=$(docker run --rm tgmate-ci psql --version)
+          echo "$api_psql_version"
+          test "$api_psql_version" = 'psql (PostgreSQL) 17.11 (Debian 17.11-0+deb13u1)'
+          docker run --rm tgmate-ci dpkg-query -W -f='${Package}=${Version}\n' postgresql-client postgresql-client-17
+          test "$(docker run --rm tgmate-ci dpkg-query -W -f='${Version}' postgresql-client)" = '17+278'
+          test "$(docker run --rm tgmate-ci dpkg-query -W -f='${Version}' postgresql-client-17)" = '17.11-0+deb13u1'
       - name: Verify isolated Compose startup and migration replay
         run: python3 scripts/container_smoke.py
       - name: Record pinned Compose image digests
@@ -93,11 +110,11 @@ jobs:
           docker image inspect 'axllent/mailpit:v1.33.0@sha256:9b3a463be15354c0f0eba91697d80e3e0d8a5623ef0e627cacc836bc17fd5231' --format 'Mailpit={{json .RepoDigests}}'
 
   preserved-v2:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16.15
+        image: postgres:16.15@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32
         env:
           POSTGRES_PASSWORD: integration-test-only
         ports: ['5432:5432']
@@ -113,30 +130,32 @@ jobs:
       PGPASSWORD: integration-test-only
       TGMATE_V2_REGRESSION: '1'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.12.16'
       - run: python -m pip install --require-hashes -r requirements.lock
       - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client=18+290ubuntu1 postgresql-client-18=18.6-1.pgdg26.04+2
       - name: Record preserved V2 runtime versions
         run: |
           python --version
+          dpkg-query -W -f='${Package}=${Version}\n' postgresql-client postgresql-client-18
+          test "$(psql --version)" = 'psql (PostgreSQL) 18.6 (Ubuntu 18.6-1.pgdg26.04+2)'
           psql --version
           psql -h localhost -U postgres -d postgres -Atqc 'SHOW server_version'
       - name: Run preserved business tests after forward safety migrations
         run: python scripts/verify_v2_regression.py
   dependency-lock:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.11.17'
       - name: Install pinned dependency resolver
