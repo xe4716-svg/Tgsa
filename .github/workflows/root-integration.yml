@@ -46,8 +46,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11.17'
-      - run: python -m pip install -r requirements.txt
-      - run: python -m pip install 'psycopg[binary]>=3.2,<4'
+      - run: python -m pip install --require-hashes -r requirements.lock
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Record Python and PostgreSQL versions
@@ -120,7 +119,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12.16'
-      - run: python -m pip install -r requirements.txt 'psycopg[binary]>=3.2,<4' 'regex>=2026.9.29'
+      - run: python -m pip install --require-hashes -r requirements.lock
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Record preserved V2 runtime versions
@@ -142,9 +141,8 @@ jobs:
           python-version: '3.11.17'
       - name: Install pinned dependency resolver
         run: python -m pip install --upgrade pip==26.2.2 pip-tools==7.6.2
-      - name: Resolve root dependencies with artifact hashes
+      - name: Verify committed root dependency lock
         run: |
-          python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=/tmp/requirements.lock requirements.txt
-          echo LOCKFILE_BEGIN
-          cat /tmp/requirements.lock
-          echo LOCKFILE_END
+          cp requirements.lock /tmp/requirements.lock
+          python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=requirements.lock requirements.txt
+          diff -u /tmp/requirements.lock requirements.lock
