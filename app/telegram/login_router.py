@@ -64,11 +64,18 @@ class ConsumeRequest(BaseModel):
     notice_version: str
 
 
+class ConsumeResponse(BaseModel):
+    account_id: UUID
+    authorization_status: Literal["PENDING", "AUTHORIZED", "RECOVERY_REQUIRED"]
+    handoff_status: Literal["AWAITING_DISCONNECT", "COMPLETED", "RECOVERY_REQUIRED"]
+    retryable: bool
+
+
 def _get_manager(request: Request):
     return request.app.state.telegram_login_manager
 
 
-def _consume_result(account_id, disconnected: bool, activated: bool) -> dict[str, Any]:
+def _consume_result(account_id, disconnected: bool, activated: bool) -> ConsumeResponse:
     """Report persisted-account and Gateway-handoff state without implying activation."""
     if activated:
         authorization_status = "AUTHORIZED"
@@ -82,12 +89,12 @@ def _consume_result(account_id, disconnected: bool, activated: bool) -> dict[str
         authorization_status = "RECOVERY_REQUIRED"
         handoff_status = "RECOVERY_REQUIRED"
         retryable = False
-    return {
-        "account_id": str(account_id),
-        "authorization_status": authorization_status,
-        "handoff_status": handoff_status,
-        "retryable": retryable,
-    }
+    return ConsumeResponse(
+        account_id=UUID(str(account_id)),
+        authorization_status=authorization_status,
+        handoff_status=handoff_status,
+        retryable=retryable,
+    )
 
 
 def _map_exception(exc: Exception) -> HTTPException:
@@ -291,7 +298,7 @@ async def cancel_login(
         raise _map_exception(exc)
 
 
-@router.post("/telegram/login/{login_id}/consume")
+@router.post("/telegram/login/{login_id}/consume", response_model=ConsumeResponse)
 async def consume_login(
     request: Request,
     login_id: str,
