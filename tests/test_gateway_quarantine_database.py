@@ -224,9 +224,16 @@ def test_flood_wait_then_disconnect_failure_is_atomically_quarantined():
                     principal = AuthPrincipal(
                         user_id, tenant_id, family_id, "OWNER", email, False
                     )
+                    routes = GatewayRoutes(pool)
+                    disabled = await routes.change(
+                        principal, account_id, False, expected_generation=2
+                    )
+                    assert disabled["enabled"] is False
+                    assert disabled["generation"] == 3
+                    assert disabled["last_reason"] == "DISCONNECT_UNCERTAIN"
                     with pytest.raises(RouteConflict, match="explicit recovery"):
-                        await GatewayRoutes(pool).change(
-                            principal, account_id, True, expected_generation=2
+                        await routes.change(
+                            principal, account_id, True, expected_generation=3
                         )
                 finally:
                     await pool.close()
