@@ -307,7 +307,7 @@ BEGIN
         UPDATE public.gateway_account_commands c
         SET status='queued',
             available_at=clock_timestamp(),
-            result='{}'::jsonb,
+            result=NULL,
             error_code=NULL,
             completed_at=NULL,
             dispatch_started_at=NULL,
