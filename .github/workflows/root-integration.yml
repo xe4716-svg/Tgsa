@@ -56,7 +56,7 @@ jobs:
           psql --version
           psql -h localhost -U postgres -d tgmate_ci -Atqc 'SHOW server_version'
       - name: Root tests and fresh database migration lifecycle
-        run: python -m pytest tests -q --junitxml=root-test-results.xml
+        run: python -m pytest tests -q -rs --junitxml=root-test-results.xml
 
       - name: Verify notification and login transactions with restricted runtime role
         env:
