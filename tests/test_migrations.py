@@ -65,7 +65,7 @@ def test_manifest_rejects_untracked_tail_sql(tmp_path):
 def test_manifest_rejects_content_drift(tmp_path):
     _copy_root_migrations(tmp_path)
     with (tmp_path / '001_core.sql').open('a', encoding='utf-8') as stream:
-        stream.write('\\n-- untracked change\\n')
+        stream.write(chr(10) + '-- untracked change' + chr(10))
     with pytest.raises(ValueError, match='manifest hash mismatch'):
         build_script(tmp_path)
 
