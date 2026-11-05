@@ -180,3 +180,43 @@ def test_permission_revoked_after_rate_limit_releases_quota(broadcast):
  assert run_once(a['tenant'],settings()['worker_id'],Adapter(False))['status']=='blocked'
  with transaction(a['tenant']) as db:
   assert db.execute("SELECT reserved_value FROM tgmate.quota_accounts WHERE entitlement_code='broadcast.messages'").fetchone()['reserved_value']==0
+
+
+def test_two_workers_cannot_claim_same_dispatch_during_preflight(broadcast):
+ a,task,run=prepare(broadcast)
+ entered=threading.Event(); resume=threading.Event()
+ class BlockingAdapter(Adapter):
+  def preflight(self,module,executor,destination):
+   self.checked.append(module)
+   entered.set()
+   if not resume.wait(10): raise RuntimeError('preflight barrier timed out')
+   return {'can_send_messages':True}
+ first_adapter=BlockingAdapter()
+ second_adapter=Adapter()
+ result={}; errors=[]
+ def first_worker():
+  try:
+   result['first']=run_once(a['tenant'],'outbox-concurrency-worker-1',first_adapter)
+  except BaseException as exc:
+   errors.append(exc)
+ thread=threading.Thread(target=first_worker,daemon=True)
+ thread.start()
+ try:
+  assert entered.wait(5), 'first worker did not reach external preflight'
+  with transaction(a['tenant']) as db:
+   state=db.execute("SELECT status,payload->>'phase' AS phase FROM tgmate.outbox_events WHERE aggregate_id=%s AND event_type='broadcast.dispatch'",(run,)).fetchone()
+  assert state['status']=='publishing' and state['phase']=='preflight'
+  second=run_once(a['tenant'],'outbox-concurrency-worker-2',second_adapter)
+ finally:
+  resume.set()
+  thread.join(10)
+ assert not thread.is_alive(), 'first worker did not finish'
+ assert not errors
+ assert result['first']['status']=='succeeded'
+ assert second['status']=='idle'
+ assert len(first_adapter.sent)==1
+ assert second_adapter.checked==[] and second_adapter.sent==[]
+ with transaction(a['tenant']) as db:
+  assert db.execute('SELECT status FROM tgmate.broadcast_task_runs WHERE id=%s',(run,)).fetchone()['status']=='completed'
+  assert db.execute("SELECT status FROM tgmate.outbox_events WHERE aggregate_id=%s AND event_type='broadcast.dispatch'",(run,)).fetchone()['status']=='published'
+  assert db.execute("SELECT consumed_value FROM tgmate.quota_accounts WHERE entitlement_code='broadcast.messages'").fetchone()['consumed_value']==1
