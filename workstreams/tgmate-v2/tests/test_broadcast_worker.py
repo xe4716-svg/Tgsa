@@ -1,4 +1,7 @@
 from test_service import service
+import uuid
+import psycopg
+from conftest import DB
 import threading
 from test_broadcast import broadcast
 from app.broadcast import create_plan,start_run,change_run
@@ -185,6 +188,10 @@ def test_permission_revoked_after_rate_limit_releases_quota(broadcast):
 
 def test_two_workers_cannot_claim_same_dispatch_during_preflight(broadcast):
  a,task,run=prepare(broadcast)
+ worker1=settings()['worker_id']
+ worker2=str(uuid.uuid4())
+ with psycopg.connect(**DB) as db:
+  db.execute("INSERT INTO tgmate.worker_nodes(id,worker_code,worker_type,status) VALUES(%s,%s,'relay','healthy')",(worker2,'outbox-concurrency-'+worker2))
  entered=threading.Event(); resume=threading.Event()
  class BlockingAdapter(Adapter):
   def preflight(self,module,executor,destination):
@@ -197,20 +204,22 @@ def test_two_workers_cannot_claim_same_dispatch_during_preflight(broadcast):
  result={}; errors=[]
  def first_worker():
   try:
-   result['first']=run_once(a['tenant'],'outbox-concurrency-worker-1',first_adapter)
+   result['first']=run_once(a['tenant'],worker1,first_adapter)
   except BaseException as exc:
    errors.append(exc)
  thread=threading.Thread(target=first_worker,daemon=True)
  thread.start()
  try:
-  assert entered.wait(5), 'first worker did not reach external preflight'
+  assert entered.wait(5), f'first worker did not reach external preflight: {errors!r}'
   with transaction(a['tenant']) as db:
    state=db.execute("SELECT status,payload->>'phase' AS phase FROM tgmate.outbox_events WHERE aggregate_id=%s AND event_type='broadcast.dispatch'",(run,)).fetchone()
   assert state['status']=='publishing' and state['phase']=='preflight'
-  second=run_once(a['tenant'],'outbox-concurrency-worker-2',second_adapter)
+  second=run_once(a['tenant'],worker2,second_adapter)
  finally:
   resume.set()
   thread.join(10)
+  with psycopg.connect(**DB) as db:
+   db.execute("DELETE FROM tgmate.worker_nodes WHERE id=%s",(worker2,))
  assert not thread.is_alive(), 'first worker did not finish'
  assert not errors
  assert result['first']['status']=='succeeded'
