@@ -91,7 +91,7 @@
   "tests/test_bot_gateway.py": "e26976b57518350615df215f167608c8fa1544e1ddb035f2c0a558554e17922c",
   "tests/test_bot_webhooks.py": "81763e49fc230e856479836040a188d57b8f512ba6d3359cade65fb529fb2067",
   "tests/test_broadcast.py": "b3fc5cd5da36c800330422b6a76a328677e66a5835e79b3510bb0f65b306a2a1",
-  "tests/test_broadcast_worker.py": "6b6d473396875b910eeaaa16cf1e1fc150140b3a34523b1795247d4180e9401a",
+  "tests/test_broadcast_worker.py": "c132895ea0e8b4bb9805d0e1fde9eae9311ade720e01394a4271cb4b7de52eff",
   "tests/test_database.py": "093137b9fc92917a31bc00f182d8ab4c8d274c46ac6d8c1deca69759b15b81b0",
   "tests/test_delivery_package.py": "937ea427a3717cffb71cd37c44d245034e6f7b0f86f937a396f166619a44d45b",
   "tests/test_github_preparation.py": "20e9cb3d600206d215ae2faf5d38d47a92bf44d591271563cde43786f737ff05",
