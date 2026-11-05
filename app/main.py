@@ -20,6 +20,7 @@ from app.telegram.login_manager import TelegramLoginManager
 from app.integration.router import router as business_reads_router
 from app.integration.relay_control import router as relay_control_router
 from app.integration.catalog import router as catalog_router
+from app.observability import configure_request_tracing
 
 
 async def _stop_workers(app):
@@ -54,8 +55,12 @@ async def stop_telegram(manager, stop, task):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    validate_startup_settings()
     async with AsyncExitStack() as cleanup:
+        # Flush telemetry last, after workers and application resources have stopped.
+        tracing_provider = getattr(app.state, "tracing_provider", None)
+        if tracing_provider is not None:
+            cleanup.callback(tracing_provider.shutdown)
+        validate_startup_settings()
         app.state.db_pool = await asyncpg.create_pool(
             dsn=settings.database_url, min_size=1, max_size=10, command_timeout=10
         )
@@ -121,3 +126,11 @@ async def root():
         "modules": ["health", "authentication", "membership_entitlements", "wallet_commerce", "payment_orchestration", "tron_usdt_watcher", "auto_renewal", "billing_notifications", "telegram_notifications"],
         "note": "Telegram integrations are not enabled until deployment secrets and integration tests are complete.",
     }
+
+
+# Tracing is opt-in: no exporter or telemetry network traffic exists by default.
+configure_request_tracing(
+    app,
+    service_name=settings.app_name,
+    environment=settings.app_env,
+)
