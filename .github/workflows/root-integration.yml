@@ -83,8 +83,8 @@ jobs:
         run: docker run --rm tgmate-ci python -c "import app.main; import app.bot_main; import app.workers.billing; import app.workers.mtproto; import app.workers.gateway; import app.workers.bot"
       - name: Record API image Python version
         run: docker run --rm tgmate-ci python --version
-      - name: Record Python base image digest
-        run: docker image inspect 'python:3.12.16-slim-trixie@sha256:8523d6abeb48ceae0b7240d30c5808fc26cb79c1a635bacdf19cf3baecfbec07' --format 'Python={{json .RepoDigests}}'
+      - name: Record API image build ID
+        run: docker image inspect tgmate-ci --format 'API image ID={{.Id}}'
       - name: Verify isolated Compose startup and migration replay
         run: python3 scripts/container_smoke.py
       - name: Record pinned Compose image digests
