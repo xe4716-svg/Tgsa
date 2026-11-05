@@ -422,3 +422,27 @@ pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page 
 ### 当前边界
 
 本轮完成候选版本/许可证核验与技术决策；没有配置生产备份、没有运行 PITR restore drill、没有部署 Collector，也没有把示例项目代码复制到产品。目标服务器、对象存储、RPO/RTO 和运维成本仍未确定。
+
+
+## 2026-11-06｜可观测性模块代码整合进展
+
+### API tracing PoC — PR #42
+
+- 独立分支 `feat/tgm-022-otel-api-tracing`；exact HEAD `14bb18624201c40b6f740e426912144d9cb16598`；API-only W3C tracing，opt-in，隐私字段排除。
+- Root Integration run 42061360065：3/3 jobs success（311 passed / 23 skipped；notification/login 27 passed；preserved V2 208 passed）；Billing unit run 42061360407：1/1 success。
+- PR #42 Ready for Review；GitHub formal Review API 尚无非作者 Review；未合并。
+
+### API metrics PoC — PR #45（PR #42 的 stacked follow-up）
+
+- 独立分支 `feat/tgm-022-otel-api-metrics`，基于 PR #42 exact HEAD，目标 base 为 PR #42 分支；PR #45 当前 Draft。
+- exact HEAD：`7b9c872be6ec328525cf644c4437b389141e3629`；4 files，+251/-5。
+- 新增 opt-in OTLP HTTP metrics：`http.server.request.count`、`http.server.request.duration`；标签仅 normalized method、FastAPI route template 或固定 `_unmatched`、HTTP status。未知 method 映射 OTHER；排除 health probes；不采集原始 URL/query/header/tenant/account/peer/exception message。
+- 默认不配置 endpoint 时关闭；API shutdown 时 flush。没有数据库/Redis 自动埋点、Worker/Gateway/业务指标、Collector 部署或生产配置。
+- 新增 InMemoryMetricReader 测试：默认关闭、counter/histogram、route label、隐私排除、health probe 排除和 method bounded label。
+- Exact-head Root Integration run 42082645858：container 与 preserved-v2 已 success；Root test job 仍运行中，尚未报告全绿。PR #45 暂不转 Ready、不合并，等待最终 CI 结论。
+
+### 研究整合状态
+
+- 成熟源码借鉴的第一个实际可测试工程切片是 API tracing（PR #42）；第二个切片是 API metrics（PR #45）。两者使用 OpenTelemetry 官方 API/SDK/OTLP exporter，不复制参考项目代码。
+- 下一步：确认 PR #45 完整 CI；通过后请求独立 Review。随后评估 worker/Gateway trace context propagation 与 structured log correlation，必须使用持久队列 context 字段且不得记录 tenant/account/session/peer 等敏感值。
+- 以上为 API 层 PoC，不等于生产 Collector 部署、全链路 metrics/tracing 或 Telegram 模块验收。
