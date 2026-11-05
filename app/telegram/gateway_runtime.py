@@ -1,7 +1,7 @@
-"""One explicitly selected account, read-only MTProto connection lifecycle.
+"""One explicitly selected account, Gateway-owned MTProto connection lifecycle.
 
-No publish/send API, automatic login, proxy switching or automatic retry exists
-here. Database ownership does not cancel an already issued Telegram request.
+Commands require an injected transport; no production sender is installed.
+Database ownership does not cancel an already issued Telegram request.
 """
 import asyncio
 import time
@@ -12,6 +12,7 @@ from telethon.errors import FloodWaitError
 from app.telegram.client_factory import create_client
 from app.telegram.gateway_leases import GatewayLeases, LeaseLost
 from app.telegram.gateway_material import load_material
+from app.telegram.gateway_command_executor import GatewayCommandExecutor, CommandResultUncertain
 
 
 class GatewayCloseUncertain(RuntimeError):
@@ -26,7 +27,7 @@ class GatewayResult:
 
 class GatewayRunner:
     def __init__(self,pool,vault,worker_id,*,ttl=30,heartbeat=5,control_timeout=3,rpc_timeout=10,close_timeout=5,
-                 leases=None,loader=None,client_factory=None):
+                 leases=None,loader=None,client_factory=None,command_store=None,command_sender=None):
         GatewayLeases._ttl(ttl)
         if not (0<heartbeat<ttl/3 and 0<control_timeout<ttl/3 and 0<rpc_timeout<ttl/2 and close_timeout>0):
             raise ValueError('Gateway timeouts must leave a safe lease margin')
@@ -37,6 +38,9 @@ class GatewayRunner:
         self.ttl,self.heartbeat,self.control_timeout=ttl,heartbeat,control_timeout
         self.rpc_timeout,self.close_timeout=rpc_timeout,close_timeout
         self._running=False
+        if (command_store is None) != (command_sender is None):
+            raise ValueError('Command store and explicit transport must be supplied together')
+        self.commands = GatewayCommandExecutor(command_store, command_sender) if command_store is not None else None
 
     async def run(self,tenant_id,account_id,stop,*,ready=None,route_generation=None):
         if self._running:
@@ -76,7 +80,7 @@ class GatewayRunner:
         async def heartbeat():
             nonlocal deadline,failure
             try:
-                while not stop.is_set():
+                while not stop.is_set() and not lost.is_set():
                     await asyncio.sleep(self.heartbeat)
                     started=time.monotonic()
                     if started>=deadline:
@@ -99,6 +103,8 @@ class GatewayRunner:
                 lost.set()
 
         try:
+            if self.commands is not None and route_generation is None:
+                raise ValueError('Commands require an explicit route generation')
             if stop.is_set():return GatewayResult('STOPPED')
             started=time.monotonic()
             lease=await asyncio.wait_for(self.leases.acquire(tenant_id,account_id,self.worker_id,self.ttl),self.control_timeout)
@@ -115,6 +121,16 @@ class GatewayRunner:
             if user is None or getattr(user,'id',None)!=material.telegram_user_id:
                 return GatewayResult('IDENTITY_MISMATCH')
             if ready is not None:ready.set()
+            if self.commands is not None:
+                while not stop.is_set() and not lost.is_set():
+                    if client.disconnected.done():
+                        return GatewayResult('CONNECTION_CLOSED')
+                    if await controlled(lambda:read_material(False),self.control_timeout) != material.revision:
+                        return GatewayResult('MATERIAL_CHANGED')
+                    worked = await self.commands.execute_one(lease,route_generation,client,controlled,self.rpc_timeout)
+                    if not worked:
+                        await controlled(lambda:asyncio.sleep(.1),self.control_timeout)
+                return GatewayResult(failure if lost.is_set() else 'STOPPED')
             stopped=asyncio.create_task(stop.wait())
             invalid=asyncio.create_task(lost.wait())
             # Telethon's disconnected future is owned by Telethon: never cancel
@@ -155,6 +171,8 @@ class GatewayRunner:
             return GatewayResult('WAIT_PERSIST_FAILED',max(1,exc.seconds))
         except LeaseLost:
             return GatewayResult(failure)
+        except CommandResultUncertain:
+            return GatewayResult('COMMAND_UNCERTAIN')
         except Exception:
             return GatewayResult('GATEWAY_FAILED')
         finally:

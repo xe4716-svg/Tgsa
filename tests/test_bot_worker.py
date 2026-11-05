@@ -17,7 +17,7 @@ def test_business_imports_share_original_source_without_shadowing_root_auth():
     import app.auth.dependencies
     for name in ('worker','broadcast_worker','private_worker','moderation_worker','verification_worker','bot_gateway','bot_webhooks'):
         module=importlib.import_module('app.business.'+name)
-        assert 'workstreams/tgmate-v2/app' in module.__file__
+        assert 'workstreams/tgmate-v2/app' in module.__file__.replace('\\', '/')
     assert importlib.import_module('app.auth.dependencies') is app.auth.dependencies
     assert worker.RetryLater(200000).seconds==200000
 
