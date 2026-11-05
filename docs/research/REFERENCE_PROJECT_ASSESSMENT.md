@@ -446,3 +446,12 @@ pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page 
 - 成熟源码借鉴的第一个实际可测试工程切片是 API tracing（PR #42）；第二个切片是 API metrics（PR #45）。两者使用 OpenTelemetry 官方 API/SDK/OTLP exporter，不复制参考项目代码。
 - 下一步：确认 PR #45 完整 CI；通过后请求独立 Review。随后评估 worker/Gateway trace context propagation 与 structured log correlation，必须使用持久队列 context 字段且不得记录 tenant/account/session/peer 等敏感值。
 - 以上为 API 层 PoC，不等于生产 Collector 部署、全链路 metrics/tracing 或 Telegram 模块验收。
+
+
+### PR #45 exact-head CI 验收结果（2026-11-06）
+
+- [Tgsa PR #45](https://github.com/xe4716-svg/Tgsa/pull/45) 已从 Draft 转为 Ready for Review；HEAD `7b9c872be6ec328525cf644c4437b389141e3629`，base 为 PR #42 分支 `feat/tgm-022-otel-api-tracing`。
+- [Root Integration run 42082645858](https://github.com/xe4716-svg/Tgsa/actions/runs/42082645858)：**3/3 jobs success**。Root suite **314 passed / 23 skipped**；notification/login **27 passed**；preserved V2 **208 passed**；Compose API/Bot/MTProto readiness、isolated secrets、schema replay 和 authorization smoke success。
+- PR #45 的 metrics 单测包括默认关闭、counter/histogram、route template、敏感路径/query/header 不进入 labels、health probe exclusion、未知 method 限定为 OTHER；随 Root suite 通过。
+- PR #42 tracing PoC exact-head CI 仍有既有通过证据（Root 3/3 + Billing 1/1）。PR #42、#45 均未合并；PR #45 GitHub Reviews API 尚无非作者正式 Review。
+- 技术交付现覆盖 API request tracing + API request metrics 两个 opt-in slices；尚未覆盖 Worker/Gateway trace propagation、queue/business metrics、structured log correlation、真实 Collector/retention/auth、PITR restore drill、OpenAPI runtime 核验或 Telegram sandbox。
