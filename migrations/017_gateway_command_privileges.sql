@@ -259,7 +259,8 @@ BEGIN
     WHERE c.id=p_command_id AND c.tenant_id=v_tenant AND c.status='claimed'
       AND c.claim_worker_id=p_worker_id AND c.claim_fencing_token=p_fencing_token
       AND c.claim_until>clock_timestamp()
-      AND (p_status='rejected' OR c.dispatch_started_at IS NOT NULL)
+      -- FloodWait is a server-confirmed non-delivery result and may occur during preflight.
+      AND (p_status IN ('rejected','flood_wait') OR c.dispatch_started_at IS NOT NULL)
       AND EXISTS (SELECT 1 FROM public.account_gateway_leases l
         WHERE l.tenant_id=c.tenant_id AND l.account_id=c.account_id
           AND l.worker_id=p_worker_id AND l.fencing_token=p_fencing_token
