@@ -46,6 +46,17 @@ def add_pending(manager, principal, **kwargs):
     return pending
 
 
+def test_consume_response_schema_exposes_handoff_state(env):
+    app,_,_=env
+    operation=app.openapi()["paths"]["/telegram/login/{login_id}/consume"]["post"]
+    schema_ref=operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    schema_name=schema_ref.rsplit("/",1)[-1]
+    properties=app.openapi()["components"]["schemas"][schema_name]["properties"]
+    assert set(properties)=={"account_id","authorization_status","handoff_status","retryable"}
+    assert properties["authorization_status"]["enum"]==["PENDING","AUTHORIZED","RECOVERY_REQUIRED"]
+    assert properties["handoff_status"]["enum"]==["AWAITING_DISCONNECT","COMPLETED","RECOVERY_REQUIRED"]
+
+
 @pytest.mark.anyio
 async def test_login_requires_authentication(env):
     app, _, _ = env
