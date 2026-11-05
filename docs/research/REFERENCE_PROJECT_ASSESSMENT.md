@@ -1,0 +1,112 @@
+# TGM-022 成熟成品源码调研与 TGMate 可复用模块评估
+
+- 审查日期：2026-11-05
+- TGMate 仓库：`xe4716-svg/Tgsa`
+- 本次审查基线：`main @ 04430ac3f552fb3631d6ea2df2a0bd3a9dad8555`
+- 范围：只读研究与架构对照；本 PR 不移植产品代码，不修改数据库或运行配置。
+
+## 1. 结论摘要
+
+没有发现一个可以整体替换 TGMate 的成熟成品。当前最合理的策略是模块级借鉴：
+
+1. **频道克隆引擎与持久化状态**：优先研究 `tamvcspk/tgmirror` 的 Gateway/Engine/Store 分层、批次写前记录、消息映射、相册单元和限流状态。
+2. **原生批量转发与实时变更**：研究 `apppurchasespro-hash/telegram-forwarder` 的流式批量转发和编辑/删除映射，但绝不引入其受保护内容下载/上传回退。
+3. **Telethon 媒体引用、相册处理**：研究 `MR-PR0G/Telegram-channel-cloner` 的媒体对象、`grouped_id` 和分页；不采用其通用异常盲重试。
+4. **前端工程基线**：`fastapi/full-stack-fastapi-template` 可作为 React/Vite/TanStack/shadcn/ui、OpenAPI client、Playwright E2E 和 Docker/CI 的参考；不替换 TGMate 现有 asyncpg/PostgreSQL/RLS 数据模型。
+5. **插件式内容处理**：`aahnik/tgcf` 的过滤、格式化和替换插件可作设计参考；它的实时映射部分依赖内存，媒体 sender 插件有文件读取/上传路径，不整体移植。
+
+所有 Telegram 参考项目都是单账号工具或单进程应用，不是 TGMate 所需的多租户 SaaS。需要将有价值的纯业务逻辑重新实现到 TGMate 既有租户、RLS、Outbox 和 Gateway 边界内。
+
+## 2. 已审查候选项目
+
+| 项目 | 许可证 / 技术 | 有价值的设计 | 不采用的部分 / 风险 | 结论 |
+|---|---|---|---|---|
+| [tgmirror](https://github.com/tamvcspk/tgmirror) | MIT；Telethon 1.45.0；SQLite；Typer/Rich | Gateway protocol、纯 Engine、Store 边界；每个源/目标 pair 的 cursor；msg_map；pending batch 写前记录；单事务推进 cursor；album Unit 不拆分；forum topic map；FloodWait/暂停/恢复 | 单账号 CLI + SQLite；策略含 reupload；引用过期后会回退下载/上传；普通路径用 Telethon 高层 forward helper；pending 恢复以目标尾部消息数量/媒体类型/相册形态作启发式判断，空尾部或模糊情况可能重新发送；不能满足 TGMate 的强 UNKNOWN 对账要求 | **首选架构参考，不直接移植** |
+| [telegram-forwarder](https://github.com/apppurchasespro-hash/telegram-forwarder) | MIT；Telethon；Quart | 流式历史遍历；最多 100 条原生转发批次；源→目标映射；编辑/删除传播；pair lock；暂停开关；论坛 topic 转发 | 对 protected source 有 download/re-upload copy-mode；raw ForwardMessagesRequest 每次重新生成 random_id；部分失败批次会推进水位；JSON 文件状态不是多进程/多租户数据库；Web Basic Auth 在未配置密码时关闭 | **只研究原生路径和事件映射** |
+| [Telegram Channel Clone Theta](https://github.com/MR-PR0G/Telegram-channel-cloner) | MIT；Telethon；Python 3.12+ | 传递现有 message.media；grouped_id 相册聚合；按消息 ID 正序分页；进度和失败记录；reply mapping 概念 | send helper 对通用异常重试，未处理响应丢失导致的 SEND_UNKNOWN；失败后仍可能推进进度；映射主要在内存；CLI 单账号 | **借鉴媒体/相册/分页，不照搬重试和状态** |
+| [tgcf](https://github.com/aahnik/tgcf) | MIT；Telethon；最后推送 2024-05-06 | past/live 分离；事件式 New/Edit/Delete；插件化 filter/format/replace/caption；配置驱动 | live message map 是进程内字典；past async 路径使用阻塞 sleep；sender plugin 通过 get_file 处理媒体；项目维护活跃度偏低 | **仅借鉴纯过滤插件接口和事件模型** |
+| [telemirror](https://github.com/khoben/telemirror) | GPL-3.0；Telethon；PostgreSQL 可选 | 多源多目标映射、话题配置、过滤、编辑/删除同步 | GPL-3.0 不适合直接并入当前产品代码，除非完成独立许可证合规评审；需另查媒体路径 | **只读概念参考，不复制代码** |
+| [Clonechat](https://github.com/matheusbach/clonechat) | MIT；Pyrogram | 历史复制、续传、内容类型处理 | 与 TGMate 的 Telethon/Gateway 不一致；包含受保护内容下载上传路径 | **不作为直接移植来源** |
+| [FastAPI Full Stack Template](https://github.com/fastapi/full-stack-fastapi-template) | MIT；FastAPI/React/TypeScript/Vite/TanStack/Tailwind/shadcn | OpenAPI client 生成、管理页组件、Playwright E2E、Docker Compose、CI、邮件测试环境 | 后端使用 SQLModel/JWT，与 TGMate 当前 asyncpg + PostgreSQL RLS/自有认证体系不同 | **前端和工程流程参考，不替换后端** |
+| [Alexander-Kz/telegram-forwarder](https://github.com/Alexander-Kz/telegram-forwarder) | MIT；Telethon/SQLite | 消息映射、增量恢复、论坛话题、失败重试台账 | 备份/恢复包含媒体下载；单账号 CLI | **仅参考状态组织和 topic map** |
+| [Grey-Time/Telethon-Channel-Clone](https://github.com/Grey-Time/Telethon-Channel-Clone) | MIT；Telethon | 基础历史遍历/发送 | 规模小、维护时间较早、可靠性能力不足 | **基础对照** |
+| [Telegram-group-and-channel-cloner](https://github.com/maksemen2/Telegram-group-and-channel-cloner) | 未发现 LICENSE | 可观察 grouped_id 相册处理 | 未发现明确许可证 | **不复制代码** |
+
+### tgmirror 版本与验证边界
+
+- 本次读取的 GitHub main commit：`db8c1128572e683e8692ada09faae06a8959cb90`（2026-10-24）。
+- 当前仓库 `pyproject.toml` 标记版本 0.3.0；PyPI 页面列出的发行版为 0.1.1（2026-09-28），两者不能混为同一发布工件。
+- 仓库测试树包含 96 个 unit 文件和 22 个 integration 文件；测试使用 FakeGateway/本地 SQLite，不等于真实 Telegram 全路径验收。
+- PyPI 项目说明明确列出部分论坛、keyring、备份/恢复、发布流程阶段只通过 fake 测试，尚未真实账号端到端验证。
+
+## 3. Telegram 原生转发的关键技术判断
+
+Telegram 官方 MTProto 文档：
+
+- [messages.forwardMessages](https://core.telegram.org/method/messages.forwardMessages) 支持批量消息 ID 和每条消息的 `random_id`。
+- [Working with Updates](https://core.telegram.org/api/updates) 说明 `updateMessageID` 可以将 `random_id` 映射到实际目标消息 ID，并通过更新差异恢复。
+- [updates.getDifference](https://core.telegram.org/method/updates.getDifference) 用于恢复离线期间或响应丢失期间的更新。
+
+TGMate 应采用以下更严格的策略：
+
+1. 对每个 route/source-message 建立持久化 operation key 和稳定 random_id；重试不得生成新 ID。
+2. 发送前持久化 pending/dispatch_started 状态；发送后持久化目标映射和 cursor。
+3. 优先原生 `ForwardMessagesRequest`，解析 `UpdateMessageID`；响应丢失时用更新差异/更新事件对账。
+4. 无法确认是否已投递时保留 UNKNOWN 并阻断该 route；不得用目标尾部消息形态猜测成功后盲目重发。
+5. 相册作为不可拆分 Unit，所有源消息分别映射到对应目标消息；批次水位只在整批结果确认后推进。
+6. 媒体引用过期时只允许用同一授权身份重新读取源消息并刷新引用一次；仍不可用就失败/跳过。删除所有 download/re-upload fallback。
+7. 来源受保护、权限未知、执行身份无访问权或 API 禁止复制时 fail closed；不绕过限制。
+
+## 4. TGMate 当前基线和缺口
+
+### 已有基础
+
+Tgsa 主仓库已有 FastAPI、PostgreSQL、Redis、租户/RLS、认证、加密 Session、Telethon 登录、会员/钱包/支付等基础。
+
+- 主仓库 main 当前审查基线：`04430ac3f552fb3631d6ea2df2a0bd3a9dad8555`。
+- PR #27 `work/v2-takeover`：Draft、未合并；有租户路由、Gateway lease/fencing、Worker、备份恢复等基础。
+- PR #28 `fix/asd-30-account-broadcast-gateway`：Draft、未合并；有持久命令表/SQL 函数/注入式 executor，但当前命令范围为 `preflight_send_text`，生产 sender、结果读取、FloodWait 恢复、账号 Worker/service 仍有缺口。
+
+### 克隆模块尚缺
+
+- 历史消息只读分页和可恢复 cursor。
+- 实时 New/Edit/Delete Inbox。
+- 历史回填与实时事件的无缝衔接。
+- 原生批量转发命令和媒体引用命令。
+- 持久 random_id 与 updateMessageID 对账。
+- 每个 route 独立的 message map、album map、cursor 和暂停状态。
+- Bot API copyMessage/forwardMessage 独立路径。
+- 权限、受保护内容、媒体引用失效、FloodWait、UNKNOWN、并发和恢复测试。
+
+## 5. TGMate 的建议模块映射
+
+| TGMate 目标模块 | 参考设计 | 接入边界 |
+|---|---|---|
+| `app/telegram/gateway_*` | tgmirror 的 Gateway protocol + Telethon adapter | 保留 TGMate Gateway lease/fencing；Gateway 是唯一 Telethon client owner |
+| `app/clone/engine`（待建） | tgmirror Engine/Runner/Planner/Batcher | 纯业务逻辑，不直接 import Telethon |
+| `app/clone/store`（待建） | tgmirror mirrors/runs/msg_map/topic_map | 改用 PostgreSQL + tenant_id + FORCE RLS；不引入 SQLite |
+| `app/clone/strategies`（待建） | 原生 copy + media reference | 只保留 copy/reference；删除 reupload 策略 |
+| `app/clone/events`（待建） | tgcf/telemirror 的事件处理概念 | 写入持久 Inbox；禁止内存字典作为唯一映射 |
+| `app/content/filters`（现有/待核对） | tgcf plugin/filter/replace | 插件纯逻辑、可版本化、可单独启停 |
+| 前端（待建设） | FastAPI Full Stack Template | 只复用 React/UI/API client/E2E 结构，后端仍走现有 API/RLS |
+| Worker | 现有 PostgreSQL Outbox/Gateway command queue | 不另起 Celery/Redis broker，除非负载实测证明必要 |
+
+## 6. 不可违反的整合规则
+
+- 不下载媒体到 TGMate 服务器，不重新上传，不使用 Agent 上传兜底。
+- 不绕过 Telegram 权限、受保护内容或转发限制；权限未知时 fail closed。
+- MTProto 操作必须走统一 Gateway，不在业务 Worker 旁路创建 TelethonClient 或读取明文 Session。
+- SEND_UNKNOWN 必须对账，不盲目重发。
+- 不将 GPL 代码直接复制进产品；MIT 复用必须保留版权/许可证声明。
+- 每个实际代码采用项独立分支、PR、实际测试和审查；本报告 PR 仅为研究文档，不包含产品代码。
+- 不修改已确认的产品需求，不将研究结果或 fake 测试描述为产品验收。
+
+## 7. 下一步
+
+1. 完成 SaaS/RBAC、管理后台、Bot API、Worker、商业系统和部署运维候选项目的第二轮研究。
+2. 将候选项目关键模块逐一映射到 TGMate 现有目录、表和 Gateway 命令契约。
+3. 与 ASD-5/7/8/9 和 PR #27/#28 的真实审查状态对齐；未解除依赖前不做频道克隆产品写入。
+4. 在专用授权测试账号和测试频道准备好后，先做原生 forward + 稳定 random_id + updateMessageID 对账 PoC。
+5. 每个被选中的实现建立独立分支/PR，并运行数据库、并发、故障恢复和 Telegram sandbox 测试。
+
+**本报告状态：第一轮研究成果。未移植产品代码；未在本轮运行 TGMate 测试；未进行真实 Telegram 发送或生产部署。**
