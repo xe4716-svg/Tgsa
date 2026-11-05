@@ -7,10 +7,15 @@ query strings, headers, peer identifiers, or exception messages.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from opentelemetry import propagate
+from opentelemetry import metrics
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import MetricExporter, MetricReader, PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
@@ -139,4 +144,112 @@ def configure_request_tracing(
         tracer=provider.get_tracer("tgmate.http", "1.0.0"),
     )
     app.state.tracing_provider = provider
+    return provider
+
+
+class RequestMetricsMiddleware:
+    """Record low-cardinality HTTP request counts and durations without secrets."""
+
+    _METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+
+    def __init__(self, app: Any, request_counter: Any, request_duration: Any) -> None:
+        self.app = app
+        self.request_counter = request_counter
+        self.request_duration = request_duration
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        if scope.get("path") in {"/health/live", "/health/ready"}:
+            await self.app(scope, receive, send)
+            return
+
+        started = time.perf_counter()
+        method_value = str(scope.get("method", "OTHER")).upper()
+        method = method_value if method_value in self._METHODS else "OTHER"
+        response_status = 500
+
+        async def send_with_metrics(message: dict[str, Any]) -> None:
+            nonlocal response_status
+            if message.get("type") == "http.response.start":
+                status = message.get("status")
+                if isinstance(status, int) and 100 <= status <= 599:
+                    response_status = status
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_metrics)
+        finally:
+            # Use only a matched route template. Unmatched requests share one
+            # bounded label and raw paths/query strings are never metric attributes.
+            route_path = getattr(scope.get("route"), "path", None)
+            route = route_path if isinstance(route_path, str) else "_unmatched"
+            attributes = {
+                "http.request.method": method,
+                "http.route": route,
+                "http.response.status_code": response_status,
+            }
+            self.request_counter.add(1, attributes)
+            self.request_duration.record(time.perf_counter() - started, attributes)
+
+
+def configure_request_metrics(
+    app: Any,
+    *,
+    endpoint: str | None = None,
+    service_name: str | None = None,
+    environment: str | None = None,
+    exporter: MetricExporter | None = None,
+    reader: MetricReader | None = None,
+) -> MeterProvider | None:
+    """Enable OTLP HTTP request metrics only when an endpoint is configured.
+
+    Labels are bounded to method, matched route template, and response status.
+    The optional exporter/reader arguments support deterministic unit tests.
+    """
+    configured_endpoint = endpoint
+    if configured_endpoint is None:
+        configured_endpoint = (
+            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+            or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        )
+    if not configured_endpoint or not configured_endpoint.strip():
+        return None
+
+    if reader is None:
+        if exporter is None:
+            exporter = (
+                OTLPMetricExporter(endpoint=configured_endpoint)
+                if endpoint is not None
+                else OTLPMetricExporter()
+            )
+        reader = PeriodicExportingMetricReader(exporter)
+
+    provider = MeterProvider(
+        resource=Resource.create(
+            {
+                "service.name": service_name or os.getenv("OTEL_SERVICE_NAME", "tgmate-api"),
+                "deployment.environment.name": environment or os.getenv("APP_ENV", "development"),
+            }
+        ),
+        metric_readers=[reader],
+    )
+    meter = provider.get_meter("tgmate.http", "1.0.0")
+    request_counter = meter.create_counter(
+        "http.server.request.count",
+        description="Number of completed HTTP server requests.",
+        unit="1",
+    )
+    request_duration = meter.create_histogram(
+        "http.server.request.duration",
+        description="Duration of completed HTTP server requests.",
+        unit="s",
+    )
+    app.add_middleware(
+        RequestMetricsMiddleware,
+        request_counter=request_counter,
+        request_duration=request_duration,
+    )
+    app.state.metrics_provider = provider
     return provider

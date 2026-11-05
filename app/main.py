@@ -20,7 +20,7 @@ from app.telegram.login_manager import TelegramLoginManager
 from app.integration.router import router as business_reads_router
 from app.integration.relay_control import router as relay_control_router
 from app.integration.catalog import router as catalog_router
-from app.observability import configure_request_tracing
+from app.observability import configure_request_metrics, configure_request_tracing
 
 
 async def _stop_workers(app):
@@ -57,6 +57,9 @@ async def stop_telegram(manager, stop, task):
 async def lifespan(app: FastAPI):
     async with AsyncExitStack() as cleanup:
         # Flush telemetry last, after workers and application resources have stopped.
+        metrics_provider = getattr(app.state, "metrics_provider", None)
+        if metrics_provider is not None:
+            cleanup.callback(metrics_provider.shutdown)
         tracing_provider = getattr(app.state, "tracing_provider", None)
         if tracing_provider is not None:
             cleanup.callback(tracing_provider.shutdown)
@@ -130,6 +133,14 @@ async def root():
 
 # Tracing is opt-in: no exporter or telemetry network traffic exists by default.
 configure_request_tracing(
+    app,
+    service_name=settings.app_name,
+    environment=settings.app_env,
+)
+
+
+# Metrics are independently opt-in and use bounded route/method/status labels.
+configure_request_metrics(
     app,
     service_name=settings.app_name,
     environment=settings.app_env,
