@@ -63,7 +63,13 @@ class GatewaySupervisor:
             except Exception:
                 await self.routes.pause(entry.route,'GATEWAY_FAILED')
                 raise RuntimeError('Account lifecycle failed') from None
-            if result.reason=='ACCOUNT_UNAVAILABLE':
+            if result.reason=='FLOOD_WAIT':
+                # The runner persisted the account-wide lease deadline. Keep the
+                # desired route enabled and retry only after that deadline; pausing
+                # the route here would make the command's FloodWait requeue unreachable.
+                delay=result.retry_after if type(result.retry_after) is int and result.retry_after>0 else self.retry_interval
+                self.retry_at[key]=self.clock()+max(self.retry_interval,delay)
+            elif result.reason=='ACCOUNT_UNAVAILABLE':
                 # Another owner or a persisted wait: bounded DB polling only.
                 self.retry_at[key]=self.clock()+self.retry_interval
             elif not (result.reason=='STOPPED' and entry.stop.is_set()):
@@ -111,7 +117,9 @@ class GatewaySupervisor:
                 uncertain=result;reason='DISCONNECT_UNCERTAIN'
             elif isinstance(result,BaseException):
                 failed=True;reason='GATEWAY_FAILED'
-            elif result.reason not in ('STOPPED','ACCOUNT_UNAVAILABLE'):
+            elif result.reason not in ('STOPPED','ACCOUNT_UNAVAILABLE','FLOOD_WAIT'):
+                # A persisted FloodWait leaves the desired route enabled for the
+                # next process; its database lease deadline remains authoritative.
                 reason=result.reason
             else:
                 continue
