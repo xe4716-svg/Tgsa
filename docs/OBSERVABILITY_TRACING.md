@@ -15,10 +15,24 @@ TGMate root runtime. It is not a complete observability deployment:
 - Liveness and readiness probes are excluded.
 - No telemetry is emitted unless an OTLP endpoint is explicitly configured.
 
+An independently opt-in HTTP metrics slice is also available:
+- `http.server.request.count` counter and `http.server.request.duration` histogram.
+- Labels are limited to a normalized method, FastAPI route template (or one fixed
+  `_unmatched` value), and numeric response status.
+- Health probes are excluded; unknown HTTP methods are collapsed to `OTHER`.
+- Raw paths, query strings, headers, tenant/account/peer identifiers and exception
+  messages are never metric labels.
+- Metrics are disabled unless `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or the common
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is configured.
+
+Example metrics endpoint:
+```dotenv
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://otel-collector:4318/v1/metrics
+```
+
 The first slice intentionally does not auto-instrument asyncpg or Redis. SQL
 statements, bind values, and Redis keys can contain sensitive data; add database
-spans only after a separate attribute-redaction review. Worker/Gateway trace
-propagation, metrics, and log correlation remain follow-up work.
+spans only after a separate attribute-redaction review. Worker/Gateway trace propagation and log correlation remain follow-up work. Metrics are API-only; worker queue depth, Gateway command outcomes and business-operation metrics are not yet instrumented.
 
 ## Configuration
 
@@ -53,7 +67,8 @@ export. Do not put collector credentials in source control.
 The unit tests use OpenTelemetry's in-memory span exporter. They verify opt-in
 behavior, W3C parent propagation, normalized route naming, health-probe
 exclusion, server-error classification, and absence of request/exception
-secrets from span attributes.
+secrets from span attributes. The metrics tests verify opt-in behavior, route-template
+labels, health-probe exclusion, bounded method labels, and absence of request secrets.
 
 These tests do not prove that a real Collector or backend is deployed. A
 deployment PoC still needs a Collector endpoint, retention/authentication
