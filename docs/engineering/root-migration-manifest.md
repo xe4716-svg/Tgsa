@@ -24,3 +24,4 @@ The manifest is not a signature and does not replace PR review; a change to both
 Business migrations keep their separate explicit `FILES` release order in `scripts/migrate_business.py` and the separate `business_schema_migrations` ledger. They must not be added to the Root manifest or Root ledger.
 The current Gateway-command candidate adds Root migrations 013–017 on the PR #28/#39 stack. The manifest must include every migration present in the final integration base, not only files present on this documentation branch.
 The current 17-file inventory includes the FloodWait retry transition from PR #39; when that migration changes before release, regenerate the manifest from the final integrated base and review the hash change.
+The FloodWait recovery transition returns a command to the queued state with a null result, matching the command result-shape constraint; the manifest hash records this exact SQL.
