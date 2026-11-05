@@ -22,3 +22,4 @@ The manifest is not a signature and does not replace PR review; a change to both
 ## Business migrations
 
 Business migrations keep their separate explicit `FILES` release order in `scripts/migrate_business.py` and the separate `business_schema_migrations` ledger. They must not be added to the Root manifest or Root ledger.
+The current Gateway-command candidate adds Root migrations 013–017 on the PR #28/#39 stack. The manifest must include every migration present in the final integration base, not only files present on this documentation branch.
