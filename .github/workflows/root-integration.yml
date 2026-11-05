@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17.11
         env:
           POSTGRES_PASSWORD: integration-test-only
           POSTGRES_DB: tgmate_ci
@@ -81,15 +81,22 @@ jobs:
         run: docker build --tag tgmate-ci .
       - name: Verify API and worker entrypoints exist
         run: docker run --rm tgmate-ci python -c "import app.main; import app.bot_main; import app.workers.billing; import app.workers.mtproto; import app.workers.gateway; import app.workers.bot"
+      - name: Record API image Python version
+        run: docker run --rm tgmate-ci python --version
       - name: Verify isolated Compose startup and migration replay
         run: python3 scripts/container_smoke.py
+      - name: Record pinned Compose image digests
+        run: |
+          docker image inspect 'postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab' --format 'PostgreSQL={{json .RepoDigests}}'
+          docker image inspect 'redis:7.4.12-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f' --format 'Redis={{json .RepoDigests}}'
+          docker image inspect 'axllent/mailpit:v1.33.0@sha256:9b3a463be15354c0f0eba91697d80e3e0d8a5623ef0e627cacc836bc17fd5231' --format 'Mailpit={{json .RepoDigests}}'
 
   preserved-v2:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16.15
         env:
           POSTGRES_PASSWORD: integration-test-only
         ports: ['5432:5432']
