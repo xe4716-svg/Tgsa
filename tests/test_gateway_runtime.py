@@ -157,7 +157,8 @@ async def test_flood_wait_then_disconnect_failure_quarantines_with_rotated_fence
     assert leases.fenced_leases[-1].fencing_token==leases.lease.fencing_token+1
     statements=[call.args[0] for call in leases.conn.execute.await_args_list]
     assert any("GATEWAY_CLOSE_UNCERTAIN" in sql for sql in statements)
-    assert any("account_gateway_routes" in sql and "DISCONNECT_UNCERTAIN" in sql for sql in statements)
+    route_updates=[call.args[0] for call in leases.conn.fetchval.await_args_list]
+    assert any("account_gateway_routes" in sql and "DISCONNECT_UNCERTAIN" in sql for sql in route_updates)
     assert any("GATEWAY_ROUTE_PAUSED" in sql for sql in statements)
 
 
