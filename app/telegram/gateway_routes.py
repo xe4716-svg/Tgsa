@@ -64,7 +64,9 @@ class GatewayRoutes:
             row = await conn.fetchrow('''INSERT INTO account_gateway_routes(tenant_id,account_id,enabled)
                 VALUES($1,$2,$3) ON CONFLICT(account_id) DO UPDATE
                 SET enabled=EXCLUDED.enabled,generation=account_gateway_routes.generation+1,
-                    last_reason=NULL,updated_at=clock_timestamp()
+                    last_reason=CASE WHEN account_gateway_routes.last_reason='DISCONNECT_UNCERTAIN'
+                                     THEN account_gateway_routes.last_reason ELSE NULL END,
+                    updated_at=clock_timestamp()
                 RETURNING account_id,enabled,generation,last_reason''', principal.tenant_id, account_id, enabled)
             await conn.execute('''INSERT INTO audit_logs(tenant_id,actor_user_id,action,resource_type,resource_id,details)
                 VALUES($1,$2,'GATEWAY_ROUTE_CHANGED','telegram_account',$3,
