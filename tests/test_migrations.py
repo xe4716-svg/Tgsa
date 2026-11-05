@@ -58,6 +58,31 @@ def test_manifest_writer_is_sorted_and_deterministic(tmp_path):
     assert write_manifest(tmp_path).read_text(encoding='utf-8') == original
 
 
+def test_manifest_writer_rejects_symlink_without_touching_target(tmp_path):
+    (tmp_path / '001_test.sql').write_text('SELECT 1;', encoding='utf-8')
+    target = tmp_path / 'outside.txt'
+    target.write_text('keep me', encoding='utf-8')
+    manifest_path = tmp_path / 'manifest.json'
+    try:
+        manifest_path.symlink_to(target)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f'Symlinks are unavailable: {exc}')
+
+    with pytest.raises(ValueError, match='regular file'):
+        write_manifest(tmp_path)
+
+    assert manifest_path.is_symlink()
+    assert target.read_text(encoding='utf-8') == 'keep me'
+
+
+def test_manifest_writer_rejects_non_regular_destination(tmp_path):
+    (tmp_path / '001_test.sql').write_text('SELECT 1;', encoding='utf-8')
+    (tmp_path / 'manifest.json').mkdir()
+
+    with pytest.raises(ValueError, match='regular file'):
+        write_manifest(tmp_path)
+
+
 def test_manifest_rejects_missing_manifest(tmp_path):
     (tmp_path / '001_test.sql').write_text('SELECT 1;')
     with pytest.raises(ValueError, match='manifest missing'):
