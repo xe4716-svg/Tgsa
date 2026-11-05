@@ -124,11 +124,13 @@ async def test_invalid_identity_never_becomes_ready(reason):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize('persisted',[True,False])
-async def test_flood_wait_holds_deadline_and_never_releases_or_retries(persisted):
+@pytest.mark.parametrize(('capture','expected_delay'),[(120,120),(1,6)])
+async def test_flood_wait_holds_persisted_lease_deadline_and_never_releases_or_retries(persisted,capture,expected_delay):
     runner,leases,client,_=await setup();leases.deferred=persisted
-    client.get_me.side_effect=FloodWaitError(request=None,capture=120)
+    client.get_me.side_effect=FloodWaitError(request=None,capture=capture)
     result=await runner.run(leases.lease.tenant_id,leases.lease.account_id,asyncio.Event())
-    assert result.reason==('FLOOD_WAIT' if persisted else 'WAIT_PERSIST_FAILED') and result.retry_after==120
+    assert result.reason==('FLOOD_WAIT' if persisted else 'WAIT_PERSIST_FAILED')
+    assert result.retry_after==expected_delay
     assert 'defer' in leases.calls and 'release' not in leases.calls
     client.get_me.assert_awaited_once();client.disconnect.assert_awaited_once()
 

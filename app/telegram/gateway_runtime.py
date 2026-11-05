@@ -151,6 +151,9 @@ class GatewayRunner:
         except FloodWaitError as exc:
             # Keep ownership unavailable through the server-mandated wait. Never
             # release this deadline in finally or automatically reconnect.
+            # Return the persisted lease delay (at least ttl), not only Telegram's
+            # raw retry_after, so the supervisor does not poll before ownership expires.
+            defer_seconds=max(self.ttl,1,exc.seconds)
             release=False
             if monitor:
                 monitor.cancel()
@@ -159,16 +162,16 @@ class GatewayRunner:
             if lease is not None:
                 try:
                     deferred=await asyncio.wait_for(
-                        self.leases.defer(lease,max(self.ttl,1,exc.seconds)),self.control_timeout)
+                        self.leases.defer(lease,defer_seconds),self.control_timeout)
                     if deferred is not None:
                         # defer() increments the durable fencing token. Adopt the
                         # returned lease so a failed disconnect can still quarantine
                         # this account with the current owner token.
                         lease=deferred
-                        return GatewayResult('FLOOD_WAIT',max(1,exc.seconds))
+                        return GatewayResult('FLOOD_WAIT',defer_seconds)
                 except Exception:
                     pass
-            return GatewayResult('WAIT_PERSIST_FAILED',max(1,exc.seconds))
+            return GatewayResult('WAIT_PERSIST_FAILED',defer_seconds)
         except LeaseLost:
             return GatewayResult(failure)
         except CommandResultUncertain:
