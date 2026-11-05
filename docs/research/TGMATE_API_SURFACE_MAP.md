@@ -152,3 +152,18 @@ Webhook endpoints 不应作为浏览器可操作页面；后台只展示经过�
 - 本轮完成路由静态盘点；没有调用运行中的 OpenAPI endpoint，没有执行 API 集成测试。
 - 下一步：基于当前代码生成并审阅实际 `/openapi.json`；在 TGM-012 页面清单冻结后生成 TS SDK；新增 API 必须按模块单独 PR，并用 OpenAPI diff + backend tests + Playwright E2E 验收。
 - 不能把当前只读 API 目录、数据库表、worker 代码或 ADR 当成已经可供 UI 调用的写 API。
+
+
+## 7. API 请求追踪 PoC（2026-11-05）
+
+PR #27 候选运行时的 API tracing 首个实现已在独立 PR [#42](https://github.com/xe4716-svg/Tgsa/pull/42) 提交，基于 OpenTelemetry API/SDK + OTLP HTTP exporter：
+
+- W3C traceparent/tracestate 入站上下文提取。
+- 仅记录 HTTP method、FastAPI route template、response status、service/environment。
+- 不采集 request body、query、headers、tenant/account/peer identifiers 或 exception message。
+- health probes 排除；未设置 OTLP endpoint 时默认关闭。
+- exact-head Root Integration 3/3 jobs、Billing unit 1/1 job 成功；根测试 311 passed / 23 skipped。
+- 当前为 API-only PoC；没有真实 Collector 部署，也没有 worker/Gateway 跨进程传播、metrics 或 log correlation。
+- PR #42 已 Ready for Review，正式独立 Review 尚未提交，未合并。
+
+这项实现不改变现有 API 路由/业务 contract；FastAPI OpenAPI runtime schema 仍需在可运行部署环境中核验。
