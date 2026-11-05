@@ -42,7 +42,7 @@ class Factory:
             if account in self.results:
                 result=self.results[account]
                 if isinstance(result,Exception):raise result
-                return GatewayResult(result)
+                return result if isinstance(result,GatewayResult) else GatewayResult(result)
             await stop.wait()
             return GatewayResult('STOPPED')
         finally:self.exits.append(route)
@@ -76,7 +76,7 @@ async def test_new_generation_waits_for_old_client_cleanup():
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize('reason',['FLOOD_WAIT','WAIT_PERSIST_FAILED','CONNECTION_CLOSED','MATERIAL_CHANGED','AUTHORIZATION_INVALID','STOPPED'])
+@pytest.mark.parametrize('reason',['WAIT_PERSIST_FAILED','CONNECTION_CLOSED','MATERIAL_CHANGED','AUTHORIZATION_INVALID','STOPPED'])
 async def test_failed_account_is_paused_without_reconnect(reason):
     tenant=uuid4();store=Routes([tenant],1);factory=Factory();route=store.rows[tenant][0]
     factory.results[route.account_id]=reason
@@ -86,6 +86,45 @@ async def test_failed_account_is_paused_without_reconnect(reason):
     assert factory.calls==[route]
     store.pause.assert_awaited_once_with(route,'UNEXPECTED_STOP' if reason=='STOPPED' else reason)
     await supervisor.close()
+
+
+@pytest.mark.anyio
+async def test_flood_wait_keeps_route_enabled_and_retries_after_persisted_lease_deadline():
+    tenant=uuid4();store=Routes([tenant],1);factory=Factory();now=[10]
+    route=store.rows[tenant][0]
+    factory.results[route.account_id]=GatewayResult('FLOOD_WAIT',120)
+    supervisor=GatewaySupervisor(store,factory,[tenant],capacity=1,per_tenant=1,
+                                  retry_interval=30,clock=lambda:now[0])
+
+    await supervisor.step();await asyncio.sleep(0)
+    await supervisor.step()
+    assert factory.calls==[route]
+    assert supervisor.retry_at[(tenant,route.account_id)]==130
+    store.pause.assert_not_awaited()
+
+    now[0]=129
+    await supervisor.step();await asyncio.sleep(0)
+    assert factory.calls==[route]
+    store.pause.assert_not_awaited()
+
+    now[0]=130
+    factory.results.pop(route.account_id)
+    await supervisor.step();await asyncio.sleep(0)
+    assert factory.calls==[route,route]
+    store.pause.assert_not_awaited()
+    await supervisor.close()
+
+
+@pytest.mark.anyio
+async def test_shutdown_during_persisted_flood_wait_does_not_disable_route():
+    tenant=uuid4();store=Routes([tenant],1);factory=Factory()
+    route=store.rows[tenant][0]
+    factory.results[route.account_id]=GatewayResult('FLOOD_WAIT',120)
+    supervisor=GatewaySupervisor(store,factory,[tenant],capacity=1,per_tenant=1)
+
+    await supervisor.step();await asyncio.sleep(0)
+    await supervisor.close()
+    store.pause.assert_not_awaited()
 
 
 @pytest.mark.anyio
