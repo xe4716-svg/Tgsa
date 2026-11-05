@@ -21,6 +21,7 @@ class GatewayCommandExecutor:
         _, unknown = await controlled(lambda: self.store.recover_expired(*scope), timeout)
         if unknown:
             raise CommandResultUncertain('Recovered uncertain dispatch')
+        await controlled(lambda: self.store.requeue_flood_wait(*scope), timeout)
         command = await controlled(lambda: self.store.claim_next(*scope), timeout)
         if command is None:
             return False
