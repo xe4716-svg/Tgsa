@@ -2,7 +2,7 @@ name: Root integration checks
 
 on:
   pull_request:
-    paths: ['app/**', 'tests/**', 'scripts/**', 'migrations/**', 'requirements.txt', 'Dockerfile', 'docker-compose.yml', 'workstreams/tgmate-v2/**', '.github/workflows/root-integration.yml']
+    paths: ['app/**', 'tests/**', 'scripts/**', 'migrations/**', 'requirements.txt', 'requirements.lock', 'Dockerfile', 'docker-compose.yml', 'workstreams/tgmate-v2/**', '.github/workflows/root-integration.yml']
   workflow_dispatch:
 
 permissions:
@@ -46,8 +46,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11.17'
-      - run: python -m pip install -r requirements.txt
-      - run: python -m pip install 'psycopg[binary]>=3.2,<4'
+      - run: python -m pip install --require-hashes -r requirements.lock
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Record Python and PostgreSQL versions
@@ -120,7 +119,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12.16'
-      - run: python -m pip install -r requirements.txt 'psycopg[binary]>=3.2,<4' 'regex>=2026.9.29'
+      - run: python -m pip install --require-hashes -r requirements.lock
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Record preserved V2 runtime versions
@@ -130,3 +129,20 @@ jobs:
           psql -h localhost -U postgres -d postgres -Atqc 'SHOW server_version'
       - name: Run preserved business tests after forward safety migrations
         run: python scripts/verify_v2_regression.py
+  dependency-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11.17'
+      - name: Install pinned dependency resolver
+        run: python -m pip install --upgrade pip==26.2.2 pip-tools==7.6.2
+      - name: Verify committed root dependency lock
+        run: |
+          cp requirements.lock /tmp/requirements.lock
+          python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=requirements.lock requirements.txt
+          diff -u /tmp/requirements.lock requirements.lock
