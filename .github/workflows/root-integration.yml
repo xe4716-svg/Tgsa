@@ -50,6 +50,11 @@ jobs:
       - run: python -m pip install 'psycopg[binary]>=3.2,<4'
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Record Python and PostgreSQL versions
+        run: |
+          python --version
+          psql --version
+          psql -h localhost -U postgres -d tgmate_ci -Atqc 'SHOW server_version'
       - name: Root tests and fresh database migration lifecycle
         run: python -m pytest tests -q --junitxml=root-test-results.xml
 
@@ -68,6 +73,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Record Docker and Compose versions
+        run: |
+          docker version --format 'Docker client {{.Client.Version}} / server {{.Server.Version}}'
+          docker compose version
       - name: Build API and worker image
         run: docker build --tag tgmate-ci .
       - name: Verify API and worker entrypoints exist
@@ -103,6 +112,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt 'psycopg[binary]>=3.2,<4' 'regex>=2026.9.29'
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Record preserved V2 runtime versions
+        run: |
+          python --version
+          psql --version
+          psql -h localhost -U postgres -d postgres -Atqc 'SHOW server_version'
       - name: Run preserved business tests after forward safety migrations
         run: python scripts/verify_v2_regression.py
