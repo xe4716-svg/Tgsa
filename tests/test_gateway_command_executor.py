@@ -20,7 +20,7 @@ def fixture():
     command=SimpleNamespace(id=uuid4(),tenant_id=lease.tenant_id,account_id=lease.account_id,
         route_generation=3,claim_worker_id='test',claim_fencing_token=7,
         operation_kind='preflight_send_text',payload={'text':'synthetic'},destination_peer_id=123)
-    store=SimpleNamespace(recover_expired=AsyncMock(return_value=(0,0)),claim_next=AsyncMock(return_value=command),
+    store=SimpleNamespace(recover_expired=AsyncMock(return_value=(0,0)),requeue_flood_wait=AsyncMock(return_value=0),claim_next=AsyncMock(return_value=command),
         mark_dispatch_started=AsyncMock(return_value=True),finish=AsyncMock(return_value=True))
     return lease,command,store,AsyncMock(return_value=42)
 
@@ -33,6 +33,7 @@ async def test_success_uses_only_the_owned_client_and_records_result():
     lease,command,store,sender=fixture();client=object()
     assert await GatewayCommandExecutor(store,sender).execute_one(lease,3,client,controlled,1)
     sender.assert_awaited_once_with(client,command)
+    store.requeue_flood_wait.assert_awaited_once_with(lease.tenant_id,lease.account_id,'test',7)
     store.finish.assert_awaited_once_with(lease.tenant_id,command.id,'test',7,'succeeded',remote_message_id=42)
 
 
@@ -70,6 +71,7 @@ async def test_failed_boundary_never_calls_transport(boundary):
     with pytest.raises(CommandResultUncertain):
         await GatewayCommandExecutor(store,sender).execute_one(lease,3,object(),controlled,1)
     sender.assert_not_awaited()
+    if boundary=='recovery': store.requeue_flood_wait.assert_not_awaited()
 
 
 @pytest.mark.anyio
