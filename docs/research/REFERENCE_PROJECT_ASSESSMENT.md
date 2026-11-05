@@ -272,3 +272,31 @@ TGMate 根项目已使用 PostgreSQL 迁移和受限 SQL claim functions 管理 
 - 正在执行：补齐各候选项目版本/许可证/测试证据，完善 TGMate 模块到目录/表/命令的逐项映射。
 - 尚未完成：正式前端选型、备份/PITR PoC、可观测性 PoC、完整接口映射、产品代码移植、TGMate 自动化测试和真实 Telegram 验收。
 - 当前研究/设计完成度：65%。这不是产品代码完成率，也不是上线完成率。
+
+## 16. TGMate 目标目录、现有测试与可复用边界
+
+以下映射基于 PR #27 的根文件树，不把 `workstreams/tgmate-v2` 旧 workstream 当作根运行时：
+
+| TGMate 模块 | 当前根目录/迁移/测试 | 可复用点 | 缺口与动作 |
+|---|---|---|---|
+| Auth / Tenant / RBAC | `app/auth/*`；`migrations/003_auth.sql`、`004_membership.sql`、`005_entitlement_overrides.sql`；`tests/test_auth_security.py` | 保留现有认证和 tenant context；参考 ai-template 的 API key hash、invitation token hash、scope subset | 逐入口核对撤权、角色变更和 RLS；不要把 JWT scope 当唯一权限真相 |
+| MTProto Account / Session | `app/telegram/account_persistence.py`、`authorization.py`、`client_factory.py`、`login_manager.py`、`gateway_material.py`；`app/security/session_vault.py`、`session_bundle.py` | 保留 Session Vault 和 Gateway 单连接所有权 | Gateway managed client 当前关闭 updates 和重试；更新接收要有明确设计 |
+| MTProto Gateway | `app/telegram/gateway_leases.py`、`gateway_router.py`、`gateway_routes.py`、`gateway_runtime.py`、`gateway_supervisor.py`；`app/workers/mtproto.py`；`migrations/011_gateway_routes.sql` | 借鉴 tgmirror Gateway protocol，但 Gateway 仍由 TGMate lease/fencing 约束 | PR #28 只实现 text preflight command；增加 typed read/forward/reference/update-reconcile operations 前必须先完成 PR #27/#28 审查 |
+| Clone Engine | 根文件树没有 `app/clone/`，没有 clone route/message map/event inbox migration，也没有 `tests/test_clone_*` | 新建纯业务 Engine/Planner/Batcher/Reconciler；借鉴 tgmirror 的分层、album Unit 和 pending batch | 需新增 Postgres RLS schema、Gateway commands、history/live inbox、random_id map；TGM-006 仍未实现 |
+| Bot API Worker | `app/workers/bot.py`、`app/telegram/bot_rate_limits.py`、`app/bot_main.py`；`tests/test_bot_worker.py`、`test_bot_ingress.py`、`test_bot_database.py` | 保留独立 Bot worker、restricted DB role、tenant allowlist、rate limiter；按官方 Bot API 增加 copy/forward adapter | 根 worker 尚无可核实的 copyMessage(s)/forwardMessage(s) 媒体执行实现；Bot API UNKNOWN 无 random_id，必须 fail closed |
+| Relay 控制 | `app/integration/relay_control.py`、`docs/RELAY_CONTROL.md`；`tests/test_relay_control.py`、`test_relay_control_database.py` | 复用 expected_generation + idempotency key + transactional audit 的状态控制模式给 clone route pause/resume | 这只是业务会话状态控制，不是 Telegram channel clone 或 message sync |
+| Commerce / Wallet | `app/billing/automation.py`、`commerce.py`、`payment_gateway.py`、`payments.py`、`service.py`、`tron_watcher.py`；`app/workers/billing.py`；`migrations/005–009`；`tests/test_billing_*` | 保留现有钱包账本、支付 webhook、TRON sweep、renewal 和邮件 outbox | 不用 Stripe starter 替换业务；专项做账本不可变、webhook 重放、退款和续费对账 |
+| Frontend / Admin | PR #27 根树没有 `frontend/`、`web/` 或 `admin/` 目录 | 参考 ai-template 的双 portal 和 full-stack-fastapi-template 的 OpenAPI client/E2E | TGM-012 需求/UX 定稿后再选 Next.js 或 React/Vite；本轮不擅自创建 UI |
+| Backup / Restore | `scripts/database_backup.py`、`scripts/encrypted_backup.py`；`tests/test_database_backup.py`、`test_encrypted_backup.py`；`docs/DATABASE_RECOVERY.md` | 保留加密逻辑备份；比较 pgBackRest/WAL-G 做物理备份和 PITR | 缺 KMS、异地存储、retention、自动调度和真实 restore drill |
+| Health / Observability | `app/health.py`；`tests/test_health.py`；`docs/validation/health-probes.md` | 保留 liveness/readiness；参考 OpenTelemetry/Prometheus/Grafana | 根树未发现 metrics/tracing 模块；增加 trace propagation、低基数 metrics 和 Gateway/Worker correlation |
+| Deployment | `docker-compose.yml`、`docker-compose.workers.yml`、`scripts/migrate.py`、`scripts/bootstrap_combined.py`、`docs/takeover/DEPLOYMENT.md` | 保留 migrate gate、DB/Redis 私网、独立 worker overlay、受限角色 | 目标服务器、TLS ingress、对象存储、容量和成本尚未验收 |
+
+### 现有测试树盘点
+根树已有 auth、billing、bot、business reads、gateway、health、identity、login、migration、backup、proxy、relay、session、Telegram resources、worker 等测试文件。未发现 clone-specific test 文件，也未发现 frontend test tree。此处只确认测试文件存在，不代表本轮执行或通过。
+
+### 当前最小可复用方案
+1. 不整体复制任何成品仓库。
+2. 以 tgmirror 的纯 Engine/Gateway/Store 分层作为 Clone 模块结构参考。
+3. 以 TGMate 自己的 RLS、Gateway lease/fencing、持久 command queue 和审计模式作为安全/运行边界。
+4. SaaS 的 API key/invitation/scope 参考 ai-template；前端在 TGM-012 UX 确认后只选一个模板路线。
+5. 备份继续保留 AES-GCM 逻辑备份；通过 pgBackRest/WAL-G 对照确定 PITR 方案；可观测性先补 OTel trace/metrics，不引入不必要的消息 broker。
