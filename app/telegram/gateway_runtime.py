@@ -27,7 +27,7 @@ class GatewayResult:
 
 class GatewayRunner:
     def __init__(self,pool,vault,worker_id,*,ttl=30,heartbeat=5,control_timeout=3,rpc_timeout=10,close_timeout=5,
-                 leases=None,loader=None,client_factory=None,command_store=None,command_sender=None):
+                 leases=None,loader=None,client_factory=None,command_store=None,command_preflight=None,command_sender=None):
         GatewayLeases._ttl(ttl)
         if not (0<heartbeat<ttl/3 and 0<control_timeout<ttl/3 and 0<rpc_timeout<ttl/2 and close_timeout>0):
             raise ValueError('Gateway timeouts must leave a safe lease margin')
@@ -38,9 +38,14 @@ class GatewayRunner:
         self.ttl,self.heartbeat,self.control_timeout=ttl,heartbeat,control_timeout
         self.rpc_timeout,self.close_timeout=rpc_timeout,close_timeout
         self._running=False
-        if (command_store is None) != (command_sender is None):
-            raise ValueError('Command store and explicit transport must be supplied together')
-        self.commands = GatewayCommandExecutor(command_store, command_sender) if command_store is not None else None
+        if command_store is None:
+            if command_preflight is not None or command_sender is not None:
+                raise ValueError('Command store, preflight and sender must be supplied together')
+            self.commands = None
+        else:
+            if not callable(command_preflight) or not callable(command_sender):
+                raise ValueError('Command store, explicit preflight and sender are required together')
+            self.commands = GatewayCommandExecutor(command_store, command_preflight, command_sender)
 
     async def run(self,tenant_id,account_id,stop,*,ready=None,route_generation=None):
         if self._running:
