@@ -249,7 +249,12 @@ BEGIN
         result=CASE WHEN p_status='succeeded' THEN jsonb_build_object('remote_message_id',p_remote_message_id)
                     WHEN p_status='flood_wait' THEN jsonb_build_object('retry_after',p_retry_after)
                     ELSE '{}'::jsonb END,
-        error_code=p_error_code,completed_at=clock_timestamp(),updated_at=clock_timestamp(),
+        error_code=p_error_code,
+        available_at=CASE WHEN p_status='flood_wait'
+            THEN clock_timestamp()+p_retry_after*interval '1 second'
+            ELSE c.available_at END,
+        completed_at=CASE WHEN p_status='flood_wait' THEN NULL ELSE clock_timestamp() END,
+        updated_at=clock_timestamp(),
         claim_until=NULL
     WHERE c.id=p_command_id AND c.tenant_id=v_tenant AND c.status='claimed'
       AND c.claim_worker_id=p_worker_id AND c.claim_fencing_token=p_fencing_token
@@ -275,6 +280,61 @@ $$;
 ALTER FUNCTION public.finish_gateway_account_command(UUID,TEXT,BIGINT,TEXT,BIGINT,TEXT,INTEGER) OWNER TO tgs_command_owner;
 REVOKE ALL ON FUNCTION public.finish_gateway_account_command(UUID,TEXT,BIGINT,TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC,tgs_runtime;
 GRANT EXECUTE ON FUNCTION public.finish_gateway_account_command(UUID,TEXT,BIGINT,TEXT,BIGINT,TEXT,INTEGER) TO tgs_command_executor;
+
+CREATE FUNCTION public.requeue_ready_gateway_account_flood_wait(
+    p_account_id UUID, p_worker_id TEXT, p_fencing_token BIGINT
+) RETURNS INTEGER
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $
+DECLARE v_tenant UUID; v_count INTEGER := 0;
+BEGIN
+    v_tenant := public.authorize_gateway_command('execute');
+    IF v_tenant IS NULL OR p_account_id IS NULL OR p_worker_id IS NULL
+       OR length(p_worker_id) NOT BETWEEN 1 AND 150 OR p_fencing_token <= 0 THEN
+        RAISE EXCEPTION 'invalid flood-wait recovery request' USING ERRCODE = '22023';
+    END IF;
+    PERFORM public.lock_gateway_command_scope(v_tenant,p_account_id);
+    IF NOT EXISTS (
+        SELECT 1 FROM public.account_gateway_leases l
+        WHERE l.tenant_id=v_tenant AND l.account_id=p_account_id
+          AND l.worker_id=p_worker_id AND l.fencing_token=p_fencing_token
+          AND l.lease_expires_at>clock_timestamp()
+    ) THEN
+        RAISE EXCEPTION 'current gateway lease required' USING ERRCODE = '42501';
+    END IF;
+    WITH requeued AS (
+        UPDATE public.gateway_account_commands c
+        SET status='queued',
+            available_at=clock_timestamp(),
+            result='{}'::jsonb,
+            error_code=NULL,
+            completed_at=NULL,
+            dispatch_started_at=NULL,
+            claim_worker_id=NULL,
+            claim_fencing_token=NULL,
+            claim_until=NULL,
+            updated_at=clock_timestamp()
+        WHERE c.tenant_id=v_tenant AND c.account_id=p_account_id
+          AND c.status='flood_wait' AND c.available_at<=clock_timestamp()
+        RETURNING c.id,c.tenant_id,c.account_id
+    ), logged AS (
+        INSERT INTO public.gateway_account_command_events(
+            tenant_id,command_id,account_id,transition,actor_class,metadata
+        )
+        SELECT tenant_id,id,account_id,'requeued','gateway',
+            jsonb_build_object('reason_code','FLOOD_WAIT_ELAPSED')
+        FROM requeued
+        RETURNING 1
+    )
+    SELECT count(*)::integer INTO v_count FROM requeued;
+    RETURN COALESCE(v_count,0);
+END;
+$;
+
+ALTER FUNCTION public.requeue_ready_gateway_account_flood_wait(UUID,TEXT,BIGINT) OWNER TO tgs_command_owner;
+REVOKE ALL ON FUNCTION public.requeue_ready_gateway_account_flood_wait(UUID,TEXT,BIGINT) FROM PUBLIC,tgs_runtime;
+GRANT EXECUTE ON FUNCTION public.requeue_ready_gateway_account_flood_wait(UUID,TEXT,BIGINT) TO tgs_command_executor;
 
 CREATE OR REPLACE FUNCTION public.claim_next_gateway_account_command(
     p_account_id UUID,
