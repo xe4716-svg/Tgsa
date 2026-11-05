@@ -13,7 +13,9 @@ def test_released_files_have_single_atomic_wrapper():
     script = build_script(root / 'migrations')
     manifest = json.loads((root / 'migrations' / 'manifest.json').read_text(encoding='utf-8'))
     expected_count = len(manifest['migrations'])
-    assert [item['name'] for item in manifest['migrations']] == sorted(item['name'] for item in manifest['migrations'])
+    names = [item['name'] for item in manifest['migrations']]
+    assert names == sorted(names)
+    assert len(names) == len(list((root / 'migrations').glob('*.sql')))
     assert script.count('\nBEGIN;\n') == expected_count
     assert script.count('\nCOMMIT;\n') == expected_count
     assert script.index('pg_advisory_lock') < script.index('CREATE TABLE')
