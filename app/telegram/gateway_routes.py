@@ -51,8 +51,10 @@ class GatewayRoutes:
             if enabled and (account['status'] not in ('AUTHORIZED','ACTIVE')
                             or account['security_state']=='GATEWAY_CLOSE_UNCERTAIN'):
                 raise RouteConflict('Account requires recovery before routing')
-            old = await conn.fetchrow('''SELECT generation FROM account_gateway_routes
+            old = await conn.fetchrow('''SELECT generation,last_reason FROM account_gateway_routes
                 WHERE tenant_id=$1 AND account_id=$2 FOR UPDATE''', principal.tenant_id, account_id)
+            if enabled and old and old['last_reason']=='DISCONNECT_UNCERTAIN':
+                raise RouteConflict('Account requires explicit recovery before routing')
             if (old['generation'] if old else 0) != expected_generation:
                 raise RouteConflict('Route version changed; reload before retrying')
             if not old:
@@ -77,6 +79,7 @@ class GatewayRoutes:
                 JOIN tenants t ON t.id=r.tenant_id AND t.status='ACTIVE'
                 JOIN telegram_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
                 WHERE r.tenant_id=$1 AND r.enabled AND a.status IN ('AUTHORIZED','ACTIVE')
+                  AND a.security_state<>'GATEWAY_CLOSE_UNCERTAIN'
                 ORDER BY r.account_id''', tenant_id)
             return [GatewayRoute(tenant_id, r['account_id'], r['generation']) for r in rows]
 
