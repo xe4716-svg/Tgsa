@@ -25,6 +25,7 @@ def migration_body(text):
     return '\n'.join(lines)
 
 
+# Root installs require the checked-in SHA-256 inventory; explicit name lists are reserved for Business staging.
 def migration_files(directory, manifest=None):
     directory = Path(directory)
     expected_hashes = None
