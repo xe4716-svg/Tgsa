@@ -102,3 +102,22 @@ Full results are retained as JUnit artifacts in CI. Local reports are under
 `.local/asd30-*.xml` and remain outside source control. Do not treat skipped
 integration suites, fake message IDs or historical imported reports as real
 Telegram or production acceptance evidence.
+
+## 2026-11-06｜Explicit preflight / dispatch boundary (ASD-53)
+
+The executor now requires two explicit callables:
+- `preflight(client, command)`: read-only target resolution and capability checks. It must not send messages or mutate Telegram state. Its return value is an ephemeral prepared target passed directly to the sender.
+- `sender(client, command, prepared)`: the only callable allowed to perform the actual send RPC.
+
+The durable `dispatch_started_at` marker is written only after preflight succeeds. A deterministic `GatewayPreflightRejected` carries a restricted uppercase error code and is persisted as `rejected`; no send is attempted. FloodWait during preflight is persisted as `flood_wait` without setting the dispatch marker, then the Runner persists the account-wide lease delay. Other preflight errors/cancellation do not call the sender; since dispatch has not started, expired-claim recovery may safely requeue. After dispatch starts, non-FloodWait exceptions remain UNKNOWN and are never blindly retried.
+
+The GatewayRunner injection contract now requires `command_store`, `command_preflight` and `command_sender` together. The production worker remains unconfigured and cannot send messages through this slice.
+
+Validation added:
+- Unit test asserts strict order: preflight → durable dispatch marker → sender.
+- Deterministic rejection persists `rejected`, leaves `dispatch_started_at` NULL, and never invokes sender.
+- Preflight FloodWait persists a wait with no dispatch marker and can be requeued after its deadline.
+- Generic preflight failure never crosses the dispatch boundary.
+- Disposable PostgreSQL integration exercises the real rejected/FloodWait/requeue transitions with fake transports only.
+
+This change is an isolated command-executor improvement. It does not provision production principals, install a production sender, wire the account-broadcast worker, send Telegram messages, or constitute Gate A acceptance.
