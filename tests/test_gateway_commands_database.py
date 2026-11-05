@@ -62,6 +62,14 @@ def test_command_roles_mapping_fencing_recovery():
                             await s.submit_text(tenant,account,1,key,123,'hello')
                         command_id=await s.submit_text(business,account,1,key,123,'hello')
                         assert await s.submit_text(business,account,1,key,123,'hello') == command_id
+                        queued_result=await s.get_result(business,command_id)
+                        assert queued_result.status=='queued' and queued_result.result is None
+                        assert queued_result.completed_at is None
+                        assert await s.get_result(business,uuid4()) is None
+                        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                            await s.get_result(other,command_id)
+                        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                            await e.get_result(tenant,command_id)
                         with pytest.raises(asyncpg.UniqueViolationError):
                             await s.submit_text(business,account,1,key,123,'changed')
                         assert await e.claim_next(tenant,account,'gateway-test',6) is None
@@ -81,6 +89,10 @@ def test_command_roles_mapping_fencing_recovery():
                         assert not await e.mark_dispatch_started(*args)
                         assert not await e.finish(tenant,command.id,'gateway-test',6,'succeeded',remote_message_id=10)
                         assert await e.finish(*args,'succeeded',remote_message_id=10)
+                        completed_result=await s.get_result(business,command.id)
+                        assert completed_result.status=='succeeded'
+                        assert completed_result.result=={'remote_message_id':10}
+                        assert completed_result.completed_at is not None
                         assert not await e.finish(*args,'succeeded',remote_message_id=10)
                         # Exercise real SQL transitions through the executor with a fake RPC.
                         from app.telegram.gateway_command_executor import GatewayCommandExecutor
@@ -101,6 +113,10 @@ def test_command_roles_mapping_fencing_recovery():
                         flood_args=(tenant,flood_id,'gateway-test',7)
                         assert await e.mark_dispatch_started(*flood_args)
                         assert await e.finish(*flood_args,'flood_wait',retry_after=120)
+                        waiting_result=await s.get_result(business,flood_id)
+                        assert waiting_result.status=='flood_wait'
+                        assert waiting_result.result=={'retry_after':120}
+                        assert waiting_result.completed_at is None
                         state=owner.execute(
                             'SELECT status,available_at>now(),completed_at,dispatch_started_at '
                             'FROM gateway_account_commands WHERE id=%s',(flood_id,)
@@ -117,6 +133,8 @@ def test_command_roles_mapping_fencing_recovery():
                             (flood_id,)
                         ).fetchone()
                         assert state==('queued',None,None)
+                        requeued_result=await s.get_result(business,flood_id)
+                        assert requeued_result.status=='queued' and requeued_result.result is None
                         retry_claim=await e.claim_next(tenant,account,'gateway-test',7)
                         assert retry_claim.id==flood_id
                         assert await e.mark_dispatch_started(*flood_args)
