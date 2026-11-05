@@ -48,6 +48,26 @@
     {
       "name": "012_business_worker_guard.sql",
       "sha256": "7961ea66982dc8b861583934749f6cbbc21e1b61ebbdf6b6c2c139a7385ccd00"
+    },
+    {
+      "name": "013_gateway_account_commands.sql",
+      "sha256": "ee9a3ce29e0a7b279ae14fdca158daf40749bb1699abd54435b276fc266ef770"
+    },
+    {
+      "name": "014_gateway_command_functions.sql",
+      "sha256": "69139bc4327c98f1c6f8d8eca5c7dd8f992cb713b36c282c72a1a7f2f1cb4427"
+    },
+    {
+      "name": "015_gateway_claim_next_command.sql",
+      "sha256": "1004dca05d40dc4b011437db940fc1ee18b6ec62717cd77bb096e5a3fa7b496c"
+    },
+    {
+      "name": "016_gateway_command_recovery.sql",
+      "sha256": "7d83726cc09326a43dd104cf489dba21882413dbd7873bc2c44d69d5e8347a52"
+    },
+    {
+      "name": "017_gateway_command_privileges.sql",
+      "sha256": "711db158d2740c92606d47ba7bceea3e0ec76adc9d68c4804363169be7a280c1"
     }
   ]
 }
