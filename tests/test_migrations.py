@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import json
 import os
 import shutil
@@ -40,6 +41,21 @@ def _copy_root_migrations(tmp_path):
         shutil.copy2(path, tmp_path / path.name)
     shutil.copy2(root / 'manifest.json', tmp_path / 'manifest.json')
     return tmp_path
+
+
+def test_manifest_writer_is_sorted_and_deterministic(tmp_path):
+    second = tmp_path / '002_second.sql'
+    first = tmp_path / '001_first.sql'
+    second.write_bytes(b'SELECT 2;\\n')
+    first.write_bytes(b'SELECT 1;\\n')
+    manifest_path = write_manifest(tmp_path)
+    original = manifest_path.read_text(encoding='utf-8')
+    payload = json.loads(original)
+    assert [item['name'] for item in payload['migrations']] == [
+        '001_first.sql', '002_second.sql'
+    ]
+    assert payload['migrations'][0]['sha256'] == hashlib.sha256(first.read_bytes()).hexdigest()
+    assert write_manifest(tmp_path).read_text(encoding='utf-8') == original
 
 
 def test_manifest_rejects_missing_manifest(tmp_path):
