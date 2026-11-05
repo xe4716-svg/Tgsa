@@ -21,7 +21,7 @@ class Leases:
         self.lease=AccountLease(uuid4(),uuid4(),'test',1)
         self.allowed=True;self.renewed=True;self.calls=[];self.deferred=True
         self.fenced_leases=[]
-        self.conn=SimpleNamespace(execute=AsyncMock())
+        self.conn=SimpleNamespace(execute=AsyncMock(),fetchval=AsyncMock(return_value=True))
     async def acquire(self,*args):
         self.calls.append('acquire');return self.lease if self.allowed else None
     async def renew(self,*args):
