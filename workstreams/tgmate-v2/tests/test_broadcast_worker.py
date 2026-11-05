@@ -215,6 +215,7 @@ def test_two_workers_cannot_claim_same_dispatch_during_preflight(broadcast):
  assert not errors
  assert result['first']['status']=='succeeded'
  assert second['status']=='idle'
+ assert first_adapter.checked==['bot_broadcast']
  assert len(first_adapter.sent)==1
  assert second_adapter.checked==[] and second_adapter.sent==[]
  with transaction(a['tenant']) as db:
