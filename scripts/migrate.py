@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse
 import hashlib
+import json
 import re
 import os
 import subprocess
@@ -24,10 +25,78 @@ def migration_body(text):
     return '\n'.join(lines)
 
 
-def build_script(directory):
-    files = sorted(Path(directory).glob('*.sql'))
-    if not files:
-        raise ValueError('No migrations found')
+def migration_files(directory, manifest=None):
+    directory = Path(directory)
+    expected_hashes = None
+    if manifest is None:
+        manifest_path = directory / 'manifest.json'
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            raise ValueError('Migration manifest missing')
+        try:
+            payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError):
+            raise ValueError('Migration manifest invalid') from None
+        if (not isinstance(payload, dict) or set(payload) != {'version', 'migrations'}
+                or payload['version'] != 1 or not isinstance(payload['migrations'], list)):
+            raise ValueError('Unsupported migration manifest')
+        expected_names = []
+        expected_hashes = {}
+        for item in payload['migrations']:
+            if not isinstance(item, dict) or set(item) != {'name', 'sha256'}:
+                raise ValueError('Invalid migration manifest entry')
+            name, digest = item['name'], item['sha256']
+            if (not isinstance(name, str) or Path(name).name != name
+                    or not re.fullmatch(r'[0-9A-Za-z_.-]+\\.sql', name)
+                    or name in expected_hashes):
+                raise ValueError('Unsafe or duplicate migration name')
+            if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+                raise ValueError('Invalid migration SHA-256')
+            expected_names.append(name)
+            expected_hashes[name] = digest
+    else:
+        if not isinstance(manifest, (list, tuple)):
+            raise ValueError('Invalid explicit migration manifest')
+        expected_names = list(manifest)
+        if any(not isinstance(name, str) or Path(name).name != name
+               or not re.fullmatch(r'[0-9A-Za-z_.-]+\\.sql', name) for name in expected_names):
+            raise ValueError('Unsafe migration name')
+    if not expected_names or expected_names != sorted(expected_names):
+        raise ValueError('Migration manifest must be non-empty and sorted')
+    if len(set(expected_names)) != len(expected_names):
+        raise ValueError('Duplicate migration name in manifest')
+    files = sorted(directory.glob('*.sql'), key=lambda path: path.name)
+    if any(path.is_symlink() or not path.is_file() for path in files):
+        raise ValueError('Migration files must be regular files')
+    if [path.name for path in files] != expected_names:
+        raise ValueError('Migration files do not match manifest')
+    if expected_hashes is not None:
+        for path in files:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest != expected_hashes[path.name]:
+                raise ValueError('Migration manifest hash mismatch')
+    return files
+
+
+def write_manifest(directory):
+    directory = Path(directory)
+    files = sorted(directory.glob('*.sql'), key=lambda path: path.name)
+    if not files or any(path.is_symlink() or not path.is_file() for path in files):
+        raise ValueError('No regular migration files found')
+    entries = []
+    for path in files:
+        if not re.fullmatch(r'[0-9A-Za-z_.-]+\\.sql', path.name):
+            raise ValueError('Unsafe migration name')
+        entries.append({'name': path.name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+    manifest_path = directory / 'manifest.json'
+    manifest_path.write_text(
+        json.dumps({'version': 1, 'migrations': entries}, indent=2) + '\\n',
+        encoding='utf-8',
+    )
+    return manifest_path
+
+
+def build_script(directory, manifest=None):
+    files = migration_files(directory, manifest)
     script = [r'\set ON_ERROR_STOP on',
               "SELECT pg_advisory_lock(847293018421);",
               'CREATE TABLE IF NOT EXISTS public.schema_migrations '
