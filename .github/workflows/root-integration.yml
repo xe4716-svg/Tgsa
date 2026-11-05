@@ -2,7 +2,7 @@ name: Root integration checks
 
 on:
   pull_request:
-    paths: ['app/**', 'tests/**', 'scripts/**', 'migrations/**', 'requirements.txt', 'Dockerfile', 'docker-compose.yml', 'workstreams/tgmate-v2/**', '.github/workflows/root-integration.yml']
+    paths: ['app/**', 'tests/**', 'scripts/**', 'migrations/**', 'requirements.txt', 'requirements.lock', 'Dockerfile', 'docker-compose.yml', 'workstreams/tgmate-v2/**', '.github/workflows/root-integration.yml']
   workflow_dispatch:
 
 permissions:
