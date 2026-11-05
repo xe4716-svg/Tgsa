@@ -1,12 +1,15 @@
 """Run ordered SQL migrations with psql; connection secrets belong in PG* environment."""
+# Root installs require the checked-in SHA-256 inventory; explicit name lists are reserved for Business staging.
 from pathlib import Path
 import argparse
 import hashlib
 import json
 import re
 import os
+import stat
 import subprocess
 import sys
+import tempfile
 
 
 def migration_body(text):
@@ -25,7 +28,6 @@ def migration_body(text):
     return '\n'.join(lines)
 
 
-# Root installs require the checked-in SHA-256 inventory; explicit name lists are reserved for Business staging.
 def migration_files(directory, manifest=None):
     directory = Path(directory)
     expected_hashes = None
@@ -89,10 +91,37 @@ def write_manifest(directory):
             raise ValueError('Unsafe migration name')
         entries.append({'name': path.name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
     manifest_path = directory / 'manifest.json'
-    manifest_path.write_text(
-        json.dumps({'version': 1, 'migrations': entries}, indent=2) + '\n',
-        encoding='utf-8',
-    )
+    try:
+        manifest_mode = manifest_path.lstat().st_mode
+    except FileNotFoundError:
+        pass
+    else:
+        # lstat() inspects the directory entry itself; never follow a symlink.
+        if not stat.S_ISREG(manifest_mode):
+            raise ValueError('Migration manifest must be a regular file')
+
+    content = json.dumps({'version': 1, 'migrations': entries}, indent=2) + '\n'
+    temporary_path = None
+    try:
+        # Write beside the destination and atomically replace it. os.replace()
+        # replaces a raced-in symlink itself rather than writing through it.
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', newline='\n',
+            dir=directory, prefix='.manifest.json.', suffix='.tmp',
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, manifest_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
     return manifest_path
 
 
