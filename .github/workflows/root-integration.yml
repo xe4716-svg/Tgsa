@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.11.17'
       - run: python -m pip install -r requirements.txt
       - run: python -m pip install 'psycopg[binary]>=3.2,<4'
       - name: Install PostgreSQL client
@@ -83,6 +83,8 @@ jobs:
         run: docker run --rm tgmate-ci python -c "import app.main; import app.bot_main; import app.workers.billing; import app.workers.mtproto; import app.workers.gateway; import app.workers.bot"
       - name: Record API image Python version
         run: docker run --rm tgmate-ci python --version
+      - name: Record Python base image digest
+        run: docker image inspect 'python:3.12.16-slim-trixie@sha256:8523d6abeb48ceae0b7240d30c5808fc26cb79c1a635bacdf19cf3baecfbec07' --format 'Python={{json .RepoDigests}}'
       - name: Verify isolated Compose startup and migration replay
         run: python3 scripts/container_smoke.py
       - name: Record pinned Compose image digests
@@ -117,7 +119,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: '3.12.16'
       - run: python -m pip install -r requirements.txt 'psycopg[binary]>=3.2,<4' 'regex>=2026.9.29'
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
