@@ -1,4 +1,5 @@
 """Run ordered SQL migrations with psql; connection secrets belong in PG* environment."""
+# Root installs require the checked-in SHA-256 inventory; explicit name lists are reserved for Business staging.
 from pathlib import Path
 import argparse
 import hashlib

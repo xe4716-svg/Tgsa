@@ -1,0 +1,60 @@
+{
+  "date": "2026-11-03",
+  "timezone": "Asia/Shanghai",
+  "branch": "fix/asd-30-account-broadcast-gateway",
+  "baseline": "0211fb1",
+  "postgres": "17.11",
+  "python": "3.11.9",
+  "reports": {
+    "focused": {
+      "tests": "59",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "1",
+      "time": "7.903"
+    },
+    "root": {
+      "tests": "344",
+      "failures": "1",
+      "errors": "7",
+      "skipped": "31",
+      "time": "14.255"
+    }
+  },
+  "limitations": [
+    "Windows encrypted backup tests: 1 failure and 7 errors (POSIX permissions/shebang assumptions)",
+    "31 full-suite skips are not passes",
+    "No live Telegram sends; fake clients/transports only",
+    "Production worker/adapter and dedicated lifecycle role not wired"
+  ],
+  "working_tree_sha256": {
+    "app/telegram/gateway_command_store.py": "c19948b41e25e7837bbe01e8d509208e76f8dbdfcac250362dd53859c1e86596",
+    "app/telegram/gateway_command_executor.py": "1d942e79e1f9af3361c152808b04e25a7509a87e2992f5e24acbb56b83451584",
+    "app/telegram/gateway_runtime.py": "1fee4f72c3078f6cb5c0200270b459bd4714a029b6e134974244d24c77f409a2",
+    "migrations/013_gateway_account_commands.sql": "acf7f743a9594f9e6d1a0d93e76d686b026f612b9cfa3b74d436375fb59cd6c2",
+    "migrations/017_gateway_command_privileges.sql": "9adce61e9d54e3d4d8c77ffa41721dfdcc883ed925c7c1ceec5892b4d9cd4432",
+    "tests/test_gateway_commands_database.py": "e9c412cf7ad23314db1f8758165ecc27ff64a135f5d2d2e74413d8fedbf11686",
+    "tests/test_gateway_command_executor.py": "dac2ee3cc16c0edc6cba9c08d8cd10531eba8810c8e0263f7e9118093a38076b"
+  },
+  "git_blob_content_sha256": {
+    "app/telegram/gateway_command_store.py": "a4a09142d9ff83eed712cc7d599c2cd38cbc1d7207ccb468cc288456f09825e5",
+    "app/telegram/gateway_command_executor.py": "1d942e79e1f9af3361c152808b04e25a7509a87e2992f5e24acbb56b83451584",
+    "app/telegram/gateway_runtime.py": "3ccfc580a152b55eb81fd11c0e7eaf82115c60c002967734cc2b1443cdf925e7",
+    "migrations/013_gateway_account_commands.sql": "ee9a3ce29e0a7b279ae14fdca158daf40749bb1699abd54435b276fc266ef770",
+    "migrations/017_gateway_command_privileges.sql": "711db158d2740c92606d47ba7bceea3e0ec76adc9d68c4804363169be7a280c1",
+    "tests/test_gateway_commands_database.py": "3589d3e8f01139f3506e3795338dad67d1c79e7a1a136f5efa380d685f6b5d73",
+    "tests/test_gateway_command_executor.py": "dac2ee3cc16c0edc6cba9c08d8cd10531eba8810c8e0263f7e9118093a38076b"
+  },
+  "hash_note": "Working-tree bytes include Windows CRLF; git blob hashes identify normalized committed content.",
+  "ci": {
+    "tested_commit": "35c7788f4302ef4c8a011d8cf0d0a7ce210154a7",
+    "run_id": 41654263499,
+    "job_id": 125980284468,
+    "url": "https://github.com/xe4716-svg/Tgsa/actions/runs/41654263499",
+    "platform": "ubuntu-latest, Python 3.12, PostgreSQL 16",
+    "passed": 313,
+    "skipped": 31,
+    "failures": 0,
+    "errors": 0
+  }
+}

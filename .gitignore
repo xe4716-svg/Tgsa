@@ -13,6 +13,7 @@
 *.pem
 *.key
 secrets/
+.local/
 
 # Python
 __pycache__/
