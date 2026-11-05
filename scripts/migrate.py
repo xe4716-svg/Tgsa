@@ -37,7 +37,7 @@ def migration_files(directory, manifest=None):
         except (OSError, json.JSONDecodeError):
             raise ValueError('Migration manifest invalid') from None
         if (not isinstance(payload, dict) or set(payload) != {'version', 'migrations'}
-                or payload['version'] != 1 or not isinstance(payload['migrations'], list)):
+                or type(payload['version']) is not int or payload['version'] != 1 or not isinstance(payload['migrations'], list)):
             raise ValueError('Unsupported migration manifest')
         expected_names = []
         expected_hashes = {}
@@ -46,7 +46,7 @@ def migration_files(directory, manifest=None):
                 raise ValueError('Invalid migration manifest entry')
             name, digest = item['name'], item['sha256']
             if (not isinstance(name, str) or Path(name).name != name
-                    or not re.fullmatch(r'[0-9A-Za-z_.-]+\\.sql', name)
+                    or not re.fullmatch(r'[0-9A-Za-z_.-]+\.sql', name)
                     or name in expected_hashes):
                 raise ValueError('Unsafe or duplicate migration name')
             if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
@@ -58,7 +58,7 @@ def migration_files(directory, manifest=None):
             raise ValueError('Invalid explicit migration manifest')
         expected_names = list(manifest)
         if any(not isinstance(name, str) or Path(name).name != name
-               or not re.fullmatch(r'[0-9A-Za-z_.-]+\\.sql', name) for name in expected_names):
+               or not re.fullmatch(r'[0-9A-Za-z_.-]+\.sql', name) for name in expected_names):
             raise ValueError('Unsafe migration name')
     if not expected_names or expected_names != sorted(expected_names):
         raise ValueError('Migration manifest must be non-empty and sorted')
@@ -84,12 +84,12 @@ def write_manifest(directory):
         raise ValueError('No regular migration files found')
     entries = []
     for path in files:
-        if not re.fullmatch(r'[0-9A-Za-z_.-]+\\.sql', path.name):
+        if not re.fullmatch(r'[0-9A-Za-z_.-]+\.sql', path.name):
             raise ValueError('Unsafe migration name')
         entries.append({'name': path.name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
     manifest_path = directory / 'manifest.json'
     manifest_path.write_text(
-        json.dumps({'version': 1, 'migrations': entries}, indent=2) + '\\n',
+        json.dumps({'version': 1, 'migrations': entries}, indent=2) + '\n',
         encoding='utf-8',
     )
     return manifest_path
