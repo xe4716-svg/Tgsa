@@ -455,3 +455,11 @@ pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page 
 - PR #45 的 metrics 单测包括默认关闭、counter/histogram、route template、敏感路径/query/header 不进入 labels、health probe exclusion、未知 method 限定为 OTHER；随 Root suite 通过。
 - PR #42 tracing PoC exact-head CI 仍有既有通过证据（Root 3/3 + Billing 1/1）。PR #42、#45 均未合并；PR #45 GitHub Reviews API 尚无非作者正式 Review。
 - 技术交付现覆盖 API request tracing + API request metrics 两个 opt-in slices；尚未覆盖 Worker/Gateway trace propagation、queue/business metrics、structured log correlation、真实 Collector/retention/auth、PITR restore drill、OpenAPI runtime 核验或 Telegram sandbox。
+
+
+### PR #46 运行时 OpenAPI schema 验证结果（2026-11-06）
+
+- [Tgsa PR #46](https://github.com/xe4716-svg/Tgsa/pull/46) 已从 Draft 转为 Ready for Review；HEAD `8c9aa3cd0d43f2f7a1d17650c9c78000c5378578`，base 为 PR #45 分支。
+- [Root Integration run 42083225285](https://github.com/xe4716-svg/Tgsa/actions/runs/42083225285)：**3/3 jobs success**。Root tests **314 passed / 23 skipped**；notification/login **27 passed**；preserved V2 **208 passed**；Compose smoke 通过，并在运行中 API 容器请求 `/openapi.json` 验证 health、auth login、Telegram QR login、Gateway route 的 path/method。
+- 运行时 OpenAPI schema 验证已由静态源码盘点升级为隔离 Compose 真实 API 容器验证；仍未做前端 SDK 自动生成/兼容 diff，也未做 TGM-012 UI/UX 验收。
+- PR #42/#45/#46 均未合并；#42/#45/#46 的正式非作者 Review 仍需分别确认。
