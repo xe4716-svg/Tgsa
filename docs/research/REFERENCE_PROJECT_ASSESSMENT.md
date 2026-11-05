@@ -186,3 +186,22 @@ PR #27 的 `workstreams/tgmate-v2/app/bot_gateway.py` 已有：
 - 正在执行：部署/监控/备份候选项目与商业模块专项对照；把上表细化到 TGMate 目标目录、数据库表和 Gateway 命令。
 - 尚未完成：完整模块映射、真实 Telegram PoC、产品代码移植、TGMate 自动化测试和生产验收。
 - 研究任务进度：50%（研究文档和首轮模块选型进度；不是产品代码或上线完成率）。
+
+
+## 12. Root Gateway 与旧 workstream 的边界澄清
+
+为避免把“仓库中存在代码”误报成“生产链路已经接通”，进一步核对 PR #27/#28 的实际文件和迁移：
+
+- PR #27 的根运行时 `app/telegram/gateway_runtime.py` 只负责 account lease/fencing、Session/Proxy material 校验、连接授权和断开生命周期；它没有生产 send API。
+- `client_factory.create_client(managed=True)` 明确关闭 auto_reconnect、connection_retries、request_retries，并设置 `receive_updates=False`。因此当前 Gateway 还没有实时克隆所需的 New/Edit/Delete/UpdateMessageID 事件接收链路。
+- PR #28 仍为 Draft，base 是 PR #27 的 `work/v2-takeover`。它新增 PostgreSQL 持久命令队列、append-only events、FORCE RLS 和 lease/fencing transition functions；当前 `operation_kind` 只允许 `preflight_send_text`，payload 只允许 text，sender 通过依赖注入且没有安装生产 Telegram transport。
+- PR #28 的 executor 对 dispatch_started 后异常采取 UNKNOWN 并停止，不盲目重发；这是后续 clone forward command 必须保留的安全语义。
+- PR #27 中 `workstreams/tgmate-v2/app/bot_gateway.py` 和 `broadcast.py` 属于独立旧 workstream，不是根 `app/` 的生产运行路径。PR #28 的 Gateway contract 明确说明旧 `telegram_adapters.py` 会从 legacy credential 创建独立 TelethonClient，尚未接入 root Gateway。旧 workstream 的 webhook Inbox 和 text-only plan 只能作为研究材料，不能描述为已经完成的根产品 Bot Gateway。
+- 当前根迁移已有 `telegram_accounts`、加密 `telegram_sessions`、`account_gateway_leases`、`account_gateway_routes` 和 FORCE RLS；尚未发现 clone route、clone batch、source→destination message map 或 clone event inbox 的根产品迁移。
+
+### 新增设计交付
+- [TGM006 Clone Engine / Gateway ADR](TGM006_CLONE_ENGINE_ADR.md)
+- 逻辑上定义 Clone Engine / Store / Gateway 边界、typed read/write operations、PostgreSQL RLS 状态模型、stable random_id、UpdateMessageID 对账、album Unit、history/live 无缝衔接、Bot API UNKNOWN 处理和测试矩阵。
+- ADR 是研究设计，不是 migration 或 implementation；产品代码整合仍等待 PR #27/#28 和 TGM-003/004/005 依赖审查。
+
+**当前研究任务进度：55%。** 第一轮源码筛选、Telegram clone 深度审查、Bot API 语义、SaaS/RBAC 候选和 Clone Engine ADR 已有书面交付；部署/监控/备份、商业模块专项研究、完整接口映射、产品代码移植和实网验收仍未完成。
