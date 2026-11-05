@@ -28,7 +28,10 @@ class Leases:
         if isinstance(self.renewed,Exception):raise self.renewed
         return self.renewed
     async def release(self,*args):self.calls.append('release');return True
-    async def defer(self,*args):self.calls.append('defer');return self.deferred
+    async def defer(self,*args):
+        from dataclasses import replace
+        self.calls.append('defer')
+        return replace(self.lease,fencing_token=self.lease.fencing_token+1) if self.deferred else None
     @asynccontextmanager
     async def fenced_transaction(self,*args):yield self.conn
 

@@ -249,7 +249,9 @@ def test_gateway_server_wait_is_durable_and_fences_previous_owner():
             await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'gateway-wait')",tenant)
             await owner.execute("INSERT INTO telegram_accounts(id,tenant_id,status) VALUES($1,$2,'AUTHORIZED')",account,tenant)
             first=await store.acquire(tenant,account,'worker-a')
-            assert await store.defer(first,120)
+            deferred=await store.defer(first,120)
+            assert deferred.fencing_token==first.fencing_token+1
+            async with store.fenced_transaction(deferred):pass
             assert not await store.renew(first) and not await store.release(first)
             second_process=GatewayLeases(pool)
             assert await second_process.acquire(tenant,account,'worker-b') is None
@@ -355,6 +357,84 @@ def test_gateway_route_rechecks_revocation_after_account_lock_wait():
         finally:
             if tx:await tx.rollback()
             if task and not task.done():task.cancel();await asyncio.gather(task,return_exceptions=True)
+            await pool.close()
+            await owner.execute('DELETE FROM tenants WHERE id=$1',tenant)
+            await owner.execute('DELETE FROM users WHERE id=$1',user)
+            await owner.close()
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(os.getenv('TGMATE_LOGIN_INTEGRATION') != '1', reason='disposable database opt-in required')
+@pytest.mark.parametrize('close_fault',['error','timeout','takeover'])
+def test_floodwait_disconnect_failure_uses_current_fence_and_blocks_route(close_fault):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from telethon.errors import FloodWaitError
+    from app.auth.dependencies import AuthPrincipal
+    from app.telegram.gateway_leases import GatewayLeases, LeaseLost
+    from app.telegram.gateway_material import AccountMaterial
+    from app.telegram.gateway_routes import GatewayRoutes, GatewayRoute, RouteConflict
+    from app.telegram.gateway_runtime import GatewayRunner, GatewayCloseUncertain
+
+    async def run():
+        owner=await asyncpg.connect(os.environ['NOTIFICATION_TEST_DATABASE_URL'])
+        pool=await asyncpg.create_pool(os.environ['NOTIFICATION_RUNTIME_DATABASE_URL'],min_size=1,max_size=3)
+        tenant,user,account,family=[uuid4() for _ in range(4)]
+        leases=GatewayLeases(pool);routes=GatewayRoutes(pool)
+        original=None;successor=None
+        try:
+            await owner.execute("INSERT INTO tenants(id,name) VALUES($1,'flood-close-test')",tenant)
+            await owner.execute('INSERT INTO users(id,auth_subject) VALUES($1,$1::uuid::text)',user)
+            await owner.execute("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'OWNER')",tenant,user)
+            await owner.execute("INSERT INTO auth_refresh_tokens(token_hash,tenant_id,user_id,family_id,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+interval '1 day')",secrets.token_hex(32),tenant,user,family)
+            await owner.execute("INSERT INTO telegram_accounts(id,tenant_id,status) VALUES($1,$2,'AUTHORIZED')",account,tenant)
+            principal=AuthPrincipal(user,tenant,family,'OWNER','test@example.test',False)
+            await routes.change(principal,account,True,0)
+            async def loader(conn,lease,vault,*,decrypt):
+                nonlocal original
+                original=lease
+                return AccountMaterial(123,'DIRECT','revision','synthetic',None)
+            async def disconnect():
+                nonlocal successor
+                if close_fault=='timeout':await asyncio.Event().wait()
+                if close_fault=='takeover':
+                    await owner.execute("UPDATE account_gateway_leases SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE account_id=$1",account)
+                    successor=await leases.acquire(tenant,account,'successor')
+                raise OSError('synthetic disconnect fault')
+            client=SimpleNamespace(connect=AsyncMock(),is_user_authorized=AsyncMock(return_value=True),
+                get_me=AsyncMock(side_effect=FloodWaitError(request=None,capture=120)),
+                disconnect=AsyncMock(side_effect=disconnect))
+            runner=GatewayRunner(pool,None,'flood-test',ttl=10,heartbeat=1,control_timeout=1,rpc_timeout=2,
+                close_timeout=.1 if close_fault=='timeout' else 2,loader=loader,client_factory=lambda *a,**k:client)
+            with pytest.raises(GatewayCloseUncertain):
+                await runner.run(tenant,account,asyncio.Event(),route_generation=1)
+            client.connect.assert_awaited_once();client.get_me.assert_awaited_once();client.disconnect.assert_awaited_once()
+            with pytest.raises(LeaseLost):
+                async with leases.fenced_transaction(original):pytest.fail('Original fence accepted')
+            state=await owner.fetchrow('SELECT status,security_state FROM telegram_accounts WHERE id=$1',account)
+            if close_fault=='takeover':
+                assert successor.fencing_token==original.fencing_token+2
+                assert state['status']=='AUTHORIZED'
+                async with leases.fenced_transaction(successor):pass
+                assert await owner.fetchval("SELECT count(*) FROM account_security_events WHERE account_id=$1 AND event_type='GATEWAY_CLOSE_UNCERTAIN'",account)==0
+            else:
+                assert dict(state)=={'status':'PAUSED','security_state':'GATEWAY_CLOSE_UNCERTAIN'}
+                assert await owner.fetchval('SELECT fencing_token FROM account_gateway_leases WHERE account_id=$1',account)==original.fencing_token+1
+                assert await owner.fetchval('SELECT extract(epoch FROM lease_expires_at-clock_timestamp())>115 FROM account_gateway_leases WHERE account_id=$1',account)
+                assert await owner.fetchval("SELECT count(*) FROM audit_logs WHERE tenant_id=$1 AND action='GATEWAY_DISCONNECT_UNCERTAIN'",tenant)==1
+                assert await owner.fetchval("SELECT count(*) FROM account_security_events WHERE account_id=$1 AND event_type='GATEWAY_CLOSE_UNCERTAIN'",account)==1
+                assert await leases.acquire(tenant,account,'other') is None
+            # Supervisor fallback must block enable even if account quarantine was
+            # unavailable. Ordinary disable must not erase this durable barrier.
+            assert await routes.pause(GatewayRoute(tenant,account,1),'DISCONNECT_UNCERTAIN')
+            await owner.execute("UPDATE telegram_accounts SET status='AUTHORIZED',security_state='NEW_DEVICE' WHERE id=$1",account)
+            for generation in (2,3):
+                with pytest.raises(RouteConflict,match='recovery'):
+                    await routes.change(principal,account,True,generation)
+                if generation==2:await routes.change(principal,account,False,2)
+            assert (await routes.read(tenant,account))['last_reason']=='DISCONNECT_UNCERTAIN'
+            assert await routes.enabled(tenant)==[]
+        finally:
             await pool.close()
             await owner.execute('DELETE FROM tenants WHERE id=$1',tenant)
             await owner.execute('DELETE FROM users WHERE id=$1',user)
