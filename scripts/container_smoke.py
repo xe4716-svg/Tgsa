@@ -59,6 +59,24 @@ def main():
                      'schema ledgers').strip()
         assert actual == expected
         run(['run','--rm','--no-deps','migrate'], 'idempotent migration replay')
+        openapi_probe = """import json,urllib.request
+with urllib.request.urlopen('http://127.0.0.1:8000/openapi.json') as response:
+    schema=json.load(response)
+assert isinstance(schema.get('openapi'),str)
+paths=schema.get('paths')
+assert isinstance(paths,dict) and len(paths)>0
+expected={
+    '/health/live': {'get'},
+    '/health/ready': {'get'},
+    '/auth/login': {'post'},
+    '/telegram/login/qr': {'post'},
+    '/api/v1/telegram/accounts/{account_id}/gateway': {'get','post'},
+}
+for path,methods in expected.items():
+    assert path in paths, f'missing OpenAPI path: {path}'
+    assert methods.issubset(paths[path]), f'missing OpenAPI methods for: {path}'
+"""
+        run(['exec','-T','api','python','-c',openapi_probe], 'OpenAPI runtime schema probe')
         probe = "import urllib.request,urllib.error,json;\ntry: urllib.request.urlopen('http://127.0.0.1:8000/api/v1/relay/conversations')\nexcept urllib.error.HTTPError as e: assert e.code==401 and json.load(e)['success'] is False\nelse: raise AssertionError('Unauthenticated access accepted')"
         run(['exec','-T','api','python','-c',probe], 'API authorization probe')
         # Empty, mapped synthetic tenants make both optional workers exercise
