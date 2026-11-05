@@ -92,6 +92,43 @@ def test_command_roles_mapping_fencing_recovery():
                         assert await GatewayCommandExecutor(e,sender).execute_one(AccountLease(tenant,account,'gateway-test',7),1,object(),controlled,2)
                         assert owner.execute('SELECT status FROM gateway_account_commands WHERE id=%s',(synthetic,)).fetchone()[0]=='succeeded'
                         sender.assert_awaited_once()
+                        # FloodWait is a known non-delivery result: hold the command
+                        # until retry_after, then clear the old dispatch marker and
+                        # allow exactly one new fenced claim.
+                        flood_id=await s.submit_text(business,account,1,uuid4(),123,'flood wait')
+                        flood_claim=await e.claim_next(tenant,account,'gateway-test',7)
+                        assert flood_claim.id==flood_id
+                        flood_args=(tenant,flood_id,'gateway-test',7)
+                        assert await e.mark_dispatch_started(*flood_args)
+                        assert await e.finish(*flood_args,'flood_wait',retry_after=120)
+                        state=owner.execute(
+                            'SELECT status,available_at>now(),completed_at,dispatch_started_at '
+                            'FROM gateway_account_commands WHERE id=%s',(flood_id,)
+                        ).fetchone()
+                        assert state[0]=='flood_wait' and state[1] and state[2] is None and state[3] is not None
+                        assert await e.requeue_flood_wait(tenant,account,'gateway-test',7)==0
+                        owner.execute(
+                            "UPDATE gateway_account_commands SET available_at=now()-interval '1 second' WHERE id=%s",
+                            (flood_id,),
+                        )
+                        assert await e.requeue_flood_wait(tenant,account,'gateway-test',7)==1
+                        state=owner.execute(
+                            'SELECT status,completed_at,dispatch_started_at FROM gateway_account_commands WHERE id=%s',
+                            (flood_id,)
+                        ).fetchone()
+                        assert state==('queued',None,None)
+                        retry_claim=await e.claim_next(tenant,account,'gateway-test',7)
+                        assert retry_claim.id==flood_id
+                        assert await e.mark_dispatch_started(*flood_args)
+                        assert await e.finish(*flood_args,'succeeded',remote_message_id=33)
+                        transitions=owner.execute(
+                            "SELECT transition FROM gateway_account_command_events WHERE command_id=%s ORDER BY id",
+                            (flood_id,)
+                        ).fetchall()
+                        assert [row[0] for row in transitions]==[
+                            'submitted','claimed','dispatch_started','flood_wait',
+                            'requeued','claimed','dispatch_started','succeeded'
+                        ]
                         # Crash before dispatch requeues; crash after mark never retries.
                         second=await s.submit_text(business,account,1,uuid4(),123,'second')
                         assert (await e.claim_next(tenant,account,'gateway-test',7)).id==second

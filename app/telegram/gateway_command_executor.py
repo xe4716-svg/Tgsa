@@ -1,7 +1,8 @@
 """Serial command execution on the Runner-owned client.
 
 Transport must be explicitly injected. No production Telegram sender is installed.
-Any exception after dispatch is conservatively unknown; never retry that RPC.
+Any non-FloodWait exception after dispatch is conservatively unknown; FloodWait is
+a known non-delivery result and may be retried only after its persisted delay.
 """
 import asyncio
 
@@ -21,6 +22,7 @@ class GatewayCommandExecutor:
         _, unknown = await controlled(lambda: self.store.recover_expired(*scope), timeout)
         if unknown:
             raise CommandResultUncertain('Recovered uncertain dispatch')
+        await controlled(lambda: self.store.requeue_flood_wait(*scope), timeout)
         command = await controlled(lambda: self.store.claim_next(*scope), timeout)
         if command is None:
             return False
