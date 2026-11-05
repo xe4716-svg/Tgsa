@@ -7,3 +7,14 @@ Migration 010 stores UUID mappings without requiring the business schema during 
 Removing a root membership cascades only its member mapping, allowing immediate access revocation without deleting V2 business membership or content. Root tenant/user deletion also removes the corresponding mappings. Linking and runtime-column grants are documented in IDENTITY_LINKING.md.
 
 Opt-in test: TGMATE_IDENTITY_INTEGRATION=1 with owner PG* and optional PG_PSQL. It creates its own tgs_identity_ child database and applies original root and V2 migrations, independent of the caller's database. Use only a dedicated disposable test cluster. Tests restore the existing tgs_runtime password hash; child test databases are retained for inspection. No Telegram or payment requests are sent.
+
+
+## Consume/handoff response contract (2026-11-05)
+
+The consume endpoint keeps the existing `account_id` field and adds explicit state so clients cannot interpret a stored account as an active Gateway account:
+
+- `authorization_status=AUTHORIZED`, `handoff_status=COMPLETED`, `retryable=false`: the login connection was confirmed closed and the account activation transaction succeeded.
+- `authorization_status=PENDING`, `handoff_status=AWAITING_DISCONNECT`, `retryable=true`: the encrypted account/session record exists, but the original login connection is not yet confirmed closed. Retry consume to finish handoff; the Gateway must not take ownership.
+- `authorization_status=RECOVERY_REQUIRED`, `handoff_status=RECOVERY_REQUIRED`, `retryable=false`: the login connection is closed but the account could not be safely activated. Manual/controlled recovery is required.
+
+HTTP 200 confirms persistence of the account record, not necessarily activation. The response never contains session strings, QR tokens, verification codes, 2FA passwords, or proxy credentials.

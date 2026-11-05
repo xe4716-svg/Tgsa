@@ -46,6 +46,17 @@ def add_pending(manager, principal, **kwargs):
     return pending
 
 
+def test_consume_response_schema_exposes_handoff_state(env):
+    app,_,_=env
+    operation=app.openapi()["paths"]["/telegram/login/{login_id}/consume"]["post"]
+    schema_ref=operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    schema_name=schema_ref.rsplit("/",1)[-1]
+    properties=app.openapi()["components"]["schemas"][schema_name]["properties"]
+    assert set(properties)=={"account_id","authorization_status","handoff_status","retryable"}
+    assert properties["authorization_status"]["enum"]==["PENDING","AUTHORIZED","RECOVERY_REQUIRED"]
+    assert properties["handoff_status"]["enum"]==["AWAITING_DISCONNECT","COMPLETED","RECOVERY_REQUIRED"]
+
+
 @pytest.mark.anyio
 async def test_login_requires_authentication(env):
     app, _, _ = env
@@ -95,7 +106,7 @@ async def test_concurrent_consume_is_once_and_disconnect_failure_does_not_repeat
     app.state.db_pool = object()
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
         responses = await asyncio.gather(*[client.post('/telegram/login/opaque/consume', json={'notice_version':'v1.0'}) for _ in range(3)])
-    assert all(r.status_code == 200 and r.json() == {'account_id':str(account_id)} for r in responses)
+    assert all(r.status_code == 200 and r.json() == {"account_id":str(account_id),"authorization_status":"PENDING","handoff_status":"AWAITING_DISCONNECT","retryable":True} for r in responses)
     persist.assert_awaited_once()
     assert pending.session_string is None
     assert pending.status == 'CONSUMED'
@@ -223,7 +234,7 @@ async def test_commit_finishing_after_ttl_still_records_consumed_result(env, mon
     app.state.db_pool = object()
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
         response = await client.post('/telegram/login/opaque/consume', json={'notice_version':'v1.0'})
-    assert response.status_code == 200 and response.json()=={'account_id':str(identifier)}
+    assert response.status_code == 200 and response.json()=={"account_id":str(identifier),"authorization_status":"AUTHORIZED","handoff_status":"COMPLETED","retryable":False}
     assert pending.status == 'CONSUMED' and pending.session_string is None
 
 
@@ -255,8 +266,29 @@ async def test_failed_disconnect_never_activates_and_retry_only_finishes_handoff
         finish.assert_not_awaited()
         second=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
         assert second.status_code==200 and pending.connection_closed
-    assert first.json()==second.json()=={'account_id':str(identifier)}
+    assert first.json()=={"account_id":str(identifier),"authorization_status":"PENDING","handoff_status":"AWAITING_DISCONNECT","retryable":True}
+    assert second.json()=={"account_id":str(identifier),"authorization_status":"AUTHORIZED","handoff_status":"COMPLETED","retryable":False}
     persist.assert_awaited_once();finish.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_activation_refusal_reports_recovery_required_without_claiming_authorized(env,monkeypatch):
+    app,manager,principal=env
+    pending=add_pending(manager,principal)
+    identifier=uuid4()
+    monkeypatch.setattr('app.telegram.login_router.persist_authorized_account',AsyncMock(return_value=identifier))
+    monkeypatch.setattr('app.telegram.login_router.finish_authorized_account',AsyncMock(return_value=False))
+    app.state.db_pool=object()
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+        response=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
+    assert response.status_code==200
+    assert response.json()=={
+        'account_id':str(identifier),
+        'authorization_status':'RECOVERY_REQUIRED',
+        'handoff_status':'RECOVERY_REQUIRED',
+        'retryable':False,
+    }
+    assert pending.connection_closed and pending.status=='CONSUMED'
 
 
 @pytest.mark.anyio
@@ -274,6 +306,6 @@ async def test_activation_database_failure_retries_without_repeating_account_or_
         first=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
         assert first.status_code==503 and 'private db' not in first.text
         second=await client.post('/telegram/login/opaque/consume',json={'notice_version':'v1.0'})
-        assert second.status_code==200
+        assert second.status_code==200 and second.json()=={"account_id":str(identifier),"authorization_status":"AUTHORIZED","handoff_status":"COMPLETED","retryable":False}
     persist.assert_awaited_once();pending.client.disconnect.assert_awaited_once()
     assert finish.await_count==2 and pending.session_string is None
