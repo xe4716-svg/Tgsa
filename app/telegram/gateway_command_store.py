@@ -24,6 +24,18 @@ class GatewayCommand:
     claim_until: Any
 
 
+@dataclass(frozen=True)
+class GatewayCommandResult:
+    id: UUID
+    account_id: UUID
+    status: str
+    result: dict[str, Any] | None
+    error_code: str | None
+    available_at: Any
+    created_at: Any
+    completed_at: Any
+
+
 class GatewayCommandStore:
     """Calls only the narrowly scoped SQL transition functions."""
 
@@ -60,6 +72,30 @@ class GatewayCommandStore:
         if row is None or row["id"] is None:
             raise RuntimeError("Gateway command submission returned no identifier")
         return row["id"]
+
+    async def get_result(
+        self, tenant_id: UUID, command_id: UUID
+    ) -> GatewayCommandResult | None:
+        row = await self._call(
+            tenant_id,
+            """SELECT * FROM public.get_gateway_account_command_result($1)""",
+            command_id,
+        )
+        if row is None:
+            return None
+        result = row["result"]
+        if isinstance(result, str):
+            result = json.loads(result)
+        return GatewayCommandResult(
+            id=row["command_id"],
+            account_id=row["account_id"],
+            status=row["status"],
+            result=dict(result) if result is not None else None,
+            error_code=row["error_code"],
+            available_at=row["available_at"],
+            created_at=row["created_at"],
+            completed_at=row["completed_at"],
+        )
 
     async def claim_next(
         self,

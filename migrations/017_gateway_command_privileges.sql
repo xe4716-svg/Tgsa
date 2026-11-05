@@ -446,4 +446,38 @@ ALTER FUNCTION public.recover_expired_gateway_account_commands(UUID,TEXT,BIGINT)
 REVOKE ALL ON FUNCTION public.recover_expired_gateway_account_commands(UUID,TEXT,BIGINT) FROM PUBLIC,tgs_runtime;
 GRANT EXECUTE ON FUNCTION public.recover_expired_gateway_account_commands(UUID,TEXT,BIGINT) TO tgs_command_executor;
 
+CREATE FUNCTION public.get_gateway_account_command_result(p_command_id UUID)
+RETURNS TABLE(
+    command_id UUID,
+    account_id UUID,
+    status TEXT,
+    result JSONB,
+    error_code TEXT,
+    available_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $command_result$
+DECLARE v_tenant UUID;
+BEGIN
+    v_tenant := public.authorize_gateway_command('submit');
+    IF p_command_id IS NULL THEN
+        RAISE EXCEPTION 'command id required' USING ERRCODE = '22023';
+    END IF;
+    -- Return no row for an unknown or cross-tenant identifier. Never expose
+    -- command payload text or reveal whether another tenant owns the id.
+    RETURN QUERY
+        SELECT c.id,c.account_id,c.status,c.result,c.error_code,
+               c.available_at,c.created_at,c.completed_at
+        FROM public.gateway_account_commands c
+        WHERE c.tenant_id=v_tenant AND c.id=p_command_id;
+END;
+$command_result$;
+
+ALTER FUNCTION public.get_gateway_account_command_result(UUID) OWNER TO tgs_command_owner;
+REVOKE ALL ON FUNCTION public.get_gateway_account_command_result(UUID) FROM PUBLIC,tgs_runtime,tgs_command_executor;
+GRANT EXECUTE ON FUNCTION public.get_gateway_account_command_result(UUID) TO tgs_command_submitter;
+
 COMMIT;
