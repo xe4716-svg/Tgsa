@@ -130,6 +130,18 @@ class GatewayCommandStore:
         )
         return bool(row and row["ok"])
 
+    async def requeue_flood_wait(
+        self, tenant_id: UUID, account_id: UUID, worker_id: str, fencing_token: int
+    ) -> int:
+        row = await self._call(
+            tenant_id,
+            """SELECT public.requeue_ready_gateway_account_flood_wait($1,$2,$3) AS requeued""",
+            account_id,
+            worker_id,
+            fencing_token,
+        )
+        return int(row["requeued"]) if row else 0
+
     async def recover_expired(
         self, tenant_id: UUID, account_id: UUID, worker_id: str, fencing_token: int
     ) -> tuple[int, int]:
