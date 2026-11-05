@@ -32,9 +32,12 @@ def build_script(directory):
     # Reuse the reviewed root transaction, hash-preflight and psql machinery.
     # Numeric staging prefixes preserve the explicit release dependency order.
     with tempfile.TemporaryDirectory() as staging:
+        staged_names = []
         for index, name in enumerate(FILES, 1):
-            shutil.copyfile(directory / name, Path(staging) / f'{index:03d}_{Path(name).name}')
-        script = root_script(staging)
+            staged_name = f'{index:03d}_{Path(name).name}'
+            shutil.copyfile(directory / name, Path(staging) / staged_name)
+            staged_names.append(staged_name)
+        script = root_script(staging, manifest=staged_names)
     script = script.replace('public.schema_migrations', 'public.business_schema_migrations')
     script = script.replace('847293018421', LOCK)
     marker = f'SELECT pg_advisory_lock({LOCK});'

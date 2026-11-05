@@ -1,16 +1,22 @@
 from pathlib import Path
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
 import pytest
-from scripts.migrate import build_script, migration_body
+from scripts.migrate import build_script, migration_body, write_manifest
 
 
 def test_released_files_have_single_atomic_wrapper():
     root = Path(__file__).resolve().parents[1]
     script = build_script(root / 'migrations')
-    expected_count = len(list((root / 'migrations').glob('*.sql')))
+    manifest = json.loads((root / 'migrations' / 'manifest.json').read_text(encoding='utf-8'))
+    expected_count = len(manifest['migrations'])
+    names = [item['name'] for item in manifest['migrations']]
+    assert names == sorted(names)
+    assert len(names) == len(list((root / 'migrations').glob('*.sql')))
     assert script.count('\nBEGIN;\n') == expected_count
     assert script.count('\nCOMMIT;\n') == expected_count
     assert script.index('pg_advisory_lock') < script.index('CREATE TABLE')
@@ -24,9 +30,60 @@ def test_released_files_have_single_atomic_wrapper():
 def test_hash_changes_with_source(tmp_path):
     path = tmp_path / '001_test.sql'
     path.write_text('SELECT 1;')
-    first = build_script(tmp_path)
+    first = build_script(tmp_path, manifest=['001_test.sql'])
     path.write_text('SELECT 2;')
-    assert first != build_script(tmp_path)
+    assert first != build_script(tmp_path, manifest=['001_test.sql'])
+
+
+def _copy_root_migrations(tmp_path):
+    root = Path(__file__).resolve().parents[1] / 'migrations'
+    for path in root.glob('*.sql'):
+        shutil.copy2(path, tmp_path / path.name)
+    shutil.copy2(root / 'manifest.json', tmp_path / 'manifest.json')
+    return tmp_path
+
+
+def test_manifest_writer_is_sorted_and_deterministic(tmp_path):
+    second = tmp_path / '002_second.sql'
+    first = tmp_path / '001_first.sql'
+    second.write_bytes(b'SELECT 2;\\n')
+    first.write_bytes(b'SELECT 1;\\n')
+    manifest_path = write_manifest(tmp_path)
+    original = manifest_path.read_text(encoding='utf-8')
+    payload = json.loads(original)
+    assert [item['name'] for item in payload['migrations']] == [
+        '001_first.sql', '002_second.sql'
+    ]
+    assert payload['migrations'][0]['sha256'] == hashlib.sha256(first.read_bytes()).hexdigest()
+    assert write_manifest(tmp_path).read_text(encoding='utf-8') == original
+
+
+def test_manifest_rejects_missing_manifest(tmp_path):
+    (tmp_path / '001_test.sql').write_text('SELECT 1;')
+    with pytest.raises(ValueError, match='manifest missing'):
+        build_script(tmp_path)
+
+
+def test_manifest_rejects_missing_tail_sql(tmp_path):
+    _copy_root_migrations(tmp_path)
+    (tmp_path / '012_business_worker_guard.sql').unlink()
+    with pytest.raises(ValueError, match='do not match manifest'):
+        build_script(tmp_path)
+
+
+def test_manifest_rejects_untracked_tail_sql(tmp_path):
+    _copy_root_migrations(tmp_path)
+    (tmp_path / '999_untracked.sql').write_text('SELECT 1;')
+    with pytest.raises(ValueError, match='do not match manifest'):
+        build_script(tmp_path)
+
+
+def test_manifest_rejects_content_drift(tmp_path):
+    _copy_root_migrations(tmp_path)
+    with (tmp_path / '001_core.sql').open('a', encoding='utf-8') as stream:
+        stream.write(chr(10) + '-- untracked change' + chr(10))
+    with pytest.raises(ValueError, match='manifest hash mismatch'):
+        build_script(tmp_path)
 
 
 @pytest.mark.parametrize('text', ['BEGIN;\nSELECT 1;', 'COMMIT;', 'SELECT 1;\nBEGIN;\nCOMMIT;'])
@@ -66,18 +123,22 @@ def test_database_migration_lifecycle(tmp_path):
     assert query('SELECT count(*) FROM public.schema_migrations') == str(len(list(source.glob('*.sql'))))
     for path in source.glob('*.sql'):
         shutil.copy2(path, tmp_path / path.name)
+    write_manifest(tmp_path)
     first = tmp_path / '001_core.sql'
     original = first.read_bytes()
     first.write_bytes(original + b'\n-- hash drift probe\n')
     probe = tmp_path / '999_probe.sql'
     probe.write_text('CREATE TABLE public.migration_preflight_probe(id int);', encoding='utf-8')
+    write_manifest(tmp_path)
     assert migrate(tmp_path) != 0, 'Hash drift was accepted'
     assert query("SELECT to_regclass('public.migration_preflight_probe') IS NULL") == 't'
     first.unlink()
+    write_manifest(tmp_path)
     assert migrate(tmp_path) != 0, 'Missing applied migration was accepted'
     assert query("SELECT to_regclass('public.migration_preflight_probe') IS NULL") == 't'
     first.write_bytes(original)
     probe.write_text('CREATE TABLE public.migration_rollback_probe(id int); SELECT 1/0;', encoding='utf-8')
+    write_manifest(tmp_path)
     assert migrate(tmp_path) != 0, 'Invalid migration unexpectedly succeeded'
     assert query("SELECT to_regclass('public.migration_rollback_probe') IS NULL") == 't'
     assert query("SELECT count(*) FROM public.schema_migrations WHERE name='999_probe.sql'") == '0'
