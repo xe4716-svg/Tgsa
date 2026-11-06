@@ -82,6 +82,10 @@ def test_command_roles_mapping_fencing_recovery():
                         assert sum(c is not None for c in claims)==1
                         assert command.payload == {'text':'hello'}
                         assert command.traceparent == expected_traceparent
+                        queue_snapshot=await e.read_queue_metrics(tenant,account,1,'gateway-test',7)
+                        assert queue_snapshot['claimed_count']==1
+                        assert queue_snapshot['queued_count']==0
+                        assert queue_snapshot['oldest_queued_age_seconds']>=0
                         args=(tenant,command.id,'gateway-test',7)
                         assert not await e.finish(*args,'succeeded',remote_message_id=10)
                         owner.execute("UPDATE telegram_accounts SET status='PAUSED' WHERE id=%s", (account,))
@@ -116,6 +120,9 @@ def test_command_roles_mapping_fencing_recovery():
                         assert await e.recover_expired(tenant,account,'gateway-test',7)==(0,1)
                         await s.submit_text(business,account,1,uuid4(),123,'blocked by unknown')
                         assert await e.claim_next(tenant,account,'gateway-test',7) is None
+                        queue_snapshot=await e.read_queue_metrics(tenant,account,1,'gateway-test',7)
+                        assert queue_snapshot['unknown_count']==1
+                        assert queue_snapshot['queued_count']==1
                         owner.execute("UPDATE tgmate.tenants SET status='suspended' WHERE id=%s",(business,))
                         with pytest.raises(asyncpg.InsufficientPrivilegeError):
                             await s.submit_text(business,account,1,uuid4(),123,'denied')
