@@ -10,6 +10,7 @@ import asyncpg
 from app.config import settings
 from app.security.session_vault import SessionVault
 from app.telemetry import configure_worker_tracing
+from app.structured_logging import configure_structured_logging
 from app.telegram.gateway_routes import GatewayRoutes
 from app.telegram.gateway_runtime import GatewayRunner, GatewayCloseUncertain
 from app.telegram.gateway_supervisor import GatewaySupervisor
@@ -21,6 +22,7 @@ async def run(tenants, capacity=20, per_tenant=5):
     restorers=[]
     tracing_provider=None
     try:
+        configure_structured_logging()
         tracing_provider=configure_worker_tracing(
             service_name="tgmate-gateway-worker",
             environment=settings.app_env,
