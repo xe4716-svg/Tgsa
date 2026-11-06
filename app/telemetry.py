@@ -70,7 +70,7 @@ def configure_worker_tracing(
         except ValueError as exc:
             raise RuntimeError("OTEL_TRACES_SAMPLER_ARG must be a number from 0 to 1") from exc
     if not 0.0 <= configured_rate <= 1.0:
-        raise RuntimeError("OTEL_TRACES_SAMPLER_ARG must be a number from 0 to 1")
+        raise RuntimeError("OTEL_TRACES_SAMPLER_ARG must be between 0 and 1")
 
     if exporter is None:
         exporter = (
