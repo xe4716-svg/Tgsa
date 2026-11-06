@@ -46,7 +46,7 @@ class GatewayRoutes:
     async def change(self, principal, account_id, enabled, expected_generation):
         # Persist only the active server span. Incoming baggage/tracestate and
         # all request headers remain outside the durable control-plane record.
-        traceparent = current_traceparent()
+        traceparent = current_traceparent() if enabled else None
         async with self.transaction(principal.tenant_id) as conn:
             # Same lock ordering as account creation. Recheck authority after waits.
             await conn.fetchrow('SELECT id FROM tenants WHERE id=$1 FOR UPDATE', principal.tenant_id)
