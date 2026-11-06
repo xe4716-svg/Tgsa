@@ -5,7 +5,11 @@ Any exception after dispatch is conservatively unknown; never retry that RPC.
 """
 import asyncio
 
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
 from telethon.errors import FloodWaitError
+
+from app.telemetry import extract_trace_context
 
 
 class CommandResultUncertain(RuntimeError):
@@ -13,8 +17,9 @@ class CommandResultUncertain(RuntimeError):
 
 
 class GatewayCommandExecutor:
-    def __init__(self, store, sender):
+    def __init__(self, store, sender, *, tracer=None):
         self.store, self.sender = store, sender
+        self.tracer = tracer or trace.get_tracer("tgmate.gateway.commands", "1.0.0")
 
     async def execute_one(self, lease, generation, client, controlled, timeout):
         scope = (lease.tenant_id, lease.account_id, lease.worker_id, lease.fencing_token)
@@ -24,6 +29,36 @@ class GatewayCommandExecutor:
         command = await controlled(lambda: self.store.claim_next(*scope), timeout)
         if command is None:
             return False
+
+        parent_context = extract_trace_context(getattr(command, "traceparent", None))
+        with self.tracer.start_as_current_span(
+            "gateway.command.execute",
+            context=parent_context,
+            kind=SpanKind.CONSUMER,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            # Only bounded, non-identifying attributes are allowed. Never attach
+            # payload, peer, tenant/account IDs, operation keys or exception text.
+            span.set_attribute("gateway.command.kind", command.operation_kind)
+            span.set_attribute("gateway.route.generation", generation)
+            try:
+                result = await self._dispatch(command, lease, generation, client, controlled, timeout)
+                span.set_attribute("gateway.command.outcome", "SUCCEEDED" if result else "IDLE")
+                return result
+            except FloodWaitError as exc:
+                span.set_attribute("gateway.command.outcome", "FLOOD_WAIT")
+                span.set_attribute("gateway.retry_after_seconds", max(1, int(exc.seconds)))
+                raise
+            except CommandResultUncertain:
+                span.set_attribute("gateway.command.outcome", "UNKNOWN")
+                raise
+            except BaseException as exc:
+                span.set_attribute("gateway.command.outcome", "ERROR")
+                span.set_attribute("exception.type", type(exc).__name__)
+                raise
+
+    async def _dispatch(self, command, lease, generation, client, controlled, timeout):
         args = (lease.tenant_id, command.id, lease.worker_id, lease.fencing_token)
         if (command.tenant_id != lease.tenant_id or command.account_id != lease.account_id
                 or command.route_generation != generation
@@ -41,7 +76,10 @@ class GatewayCommandExecutor:
                 raise ValueError('Invalid remote result')
         except FloodWaitError as exc:
             try:
-                await asyncio.wait_for(self.store.finish(*args, 'flood_wait', retry_after=max(1, exc.seconds)), timeout)
+                await asyncio.wait_for(
+                    self.store.finish(*args, 'flood_wait', retry_after=max(1, exc.seconds)),
+                    timeout,
+                )
             except Exception:
                 pass
             # Always let the Runner persist the account-wide lease deferral,
@@ -51,10 +89,16 @@ class GatewayCommandExecutor:
             # This persistence attempt deliberately survives a signalled stop.
             # On DB failure/lease loss, expired-claim recovery records UNKNOWN.
             try:
-                await asyncio.wait_for(self.store.finish(*args, 'unknown', error_code='DISPATCH_UNCERTAIN'), timeout)
+                await asyncio.wait_for(
+                    self.store.finish(*args, 'unknown', error_code='DISPATCH_UNCERTAIN'),
+                    timeout,
+                )
             except Exception:
                 pass
             raise CommandResultUncertain('Dispatch result uncertain') from None
-        if not await asyncio.wait_for(self.store.finish(*args, 'succeeded', remote_message_id=message_id), timeout):
+        if not await asyncio.wait_for(
+            self.store.finish(*args, 'succeeded', remote_message_id=message_id),
+            timeout,
+        ):
             raise CommandResultUncertain('Result persistence lost')
         return True
