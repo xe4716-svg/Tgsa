@@ -31,13 +31,14 @@ class Routes:
 
 class Factory:
     def __init__(self):
-        self.calls=[];self.results={};self.exits=[]
+        self.calls=[];self.results={};self.exits=[];self.traceparents=[]
 
     def __call__(self):return self
 
-    async def run(self, tenant, account, stop, *, route_generation):
+    async def run(self, tenant, account, stop, *, route_generation, traceparent=None):
         route=GatewayRoute(tenant,account,route_generation)
         self.calls.append(route)
+        self.traceparents.append(traceparent)
         try:
             if account in self.results:
                 result=self.results[account]
@@ -154,3 +155,24 @@ async def test_pause_storage_failure_cannot_hide_uncertain_disconnect_or_skip_ot
     with pytest.raises(GatewayCloseUncertain):await supervisor.serve(asyncio.Event())
     assert len(factory.exits)==2 and not supervisor.running
     assert store.pause.await_count==2
+
+
+
+@pytest.mark.anyio
+async def test_route_trace_context_is_forwarded_once_without_changing_route_identity():
+    tenant=uuid4();store=Routes([tenant],1);factory=Factory()
+    original=store.rows[tenant][0]
+    traced=replace(original,traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    store.rows[tenant][0]=traced
+    supervisor=GatewaySupervisor(store,factory,[tenant],capacity=1,per_tenant=1)
+    await supervisor.step();await asyncio.sleep(0)
+    assert factory.calls==[original]
+    assert factory.traceparents==[traced.traceparent]
+    # A later poll may no longer carry trace metadata, but must not restart
+    # the same route generation or close its healthy connection.
+    untraced=replace(traced,traceparent=None)
+    assert traced==untraced
+    store.rows[tenant][0]=untraced
+    await supervisor.step()
+    assert factory.calls==[original]
+    await supervisor.close()

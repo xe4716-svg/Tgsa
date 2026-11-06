@@ -90,8 +90,11 @@ class GatewaySupervisor:
                 route=candidates[tenant].pop(0)
                 stop=asyncio.Event()
                 runner=self.runner_factory()
-                task=asyncio.create_task(runner.run(route.tenant_id,route.account_id,stop,
-                                                    route_generation=route.generation))
+                task=asyncio.create_task(runner.run(
+                    route.tenant_id, route.account_id, stop,
+                    route_generation=route.generation,
+                    traceparent=route.traceparent,
+                ))
                 self.running[(route.tenant_id,route.account_id)]=RunningAccount(route,stop,task)
                 started=True
             if not started:

@@ -30,9 +30,11 @@ Example metrics endpoint:
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://otel-collector:4318/v1/metrics
 ```
 
-The first slice intentionally does not auto-instrument asyncpg or Redis. SQL
-statements, bind values, and Redis keys can contain sensitive data; add database
-spans only after a separate attribute-redaction review. Worker/Gateway trace propagation and log correlation remain follow-up work. Metrics are API-only; worker queue depth, Gateway command outcomes and business-operation metrics are not yet instrumented.
+Database auto-instrumentation remains intentionally disabled. SQL statements,
+bind values, and Redis keys can contain sensitive data; add database spans only
+after a separate attribute-redaction review. API metrics remain API-only; worker
+queue depth, Gateway command outcomes, business-operation metrics, and
+trace-to-log correlation are not yet instrumented.
 
 ## Configuration
 
@@ -82,3 +84,43 @@ The MIT-licensed `blueswen/fastapi-observability` repository was reviewed as a
 reference for Tempo/Prometheus/Loki correlation and Compose-based demos; its
 Loki Docker logging-driver plugin and demo credentials are intentionally not
 adopted as TGMate runtime dependencies.
+
+
+## Durable API-to-Gateway route activation trace
+
+The desired Gateway route is a durable control-plane record, so the route-change
+API stores only the active server span's W3C `traceparent` in
+`account_gateway_routes.traceparent`. It does not persist `tracestate`,
+baggage, raw request headers, or tenant/account identifiers.
+
+- The route schema validates the version-00 W3C traceparent format.
+- The supervisor reads and clears the stored context under a row lock, so only
+  one supervisor poll can consume it.
+- Trace metadata is excluded from route equality and public route responses;
+  clearing it never restarts a healthy account connection.
+- The Gateway worker extracts the remote parent and emits a short
+  `gateway.account.activate` consumer span. The span ends once the account is
+  authorized and ready; it does not remain open for the potentially long-lived
+  MTProto socket.
+- Attributes are limited to numeric route generation, bounded outcome code,
+  and (on startup failure only) exception class plus the fixed source function
+  name. Account IDs, tenant IDs, session material, proxy settings, exception
+  messages, and Telegram user identifiers are never span attributes.
+- Worker tracing is independently opt-in through
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`.
+  The worker owns and shuts down its provider. Without an endpoint it emits no
+  telemetry and the Gateway runs unchanged.
+
+This establishes API request → durable desired-route update → Gateway activation
+correlation only. It does not claim propagation into a business command queue:
+the currently integrated Gateway runtime supervises read-only account
+connections and does not yet execute the persistent send-command queue tracked
+separately in PR #28.
+
+Worker configuration can use the same private OTLP endpoint and sampler settings:
+
+```dotenv
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+OTEL_SERVICE_NAME=tgmate-mtproto-gateway
+OTEL_TRACES_SAMPLER_ARG=0.1
+```

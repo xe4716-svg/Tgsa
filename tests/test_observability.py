@@ -1,11 +1,12 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 import pytest
 
-from app.observability import configure_request_metrics, configure_request_tracing
+from app.observability import configure_request_metrics, configure_request_tracing, configure_worker_tracing, current_traceparent
 
 
 def test_tracing_is_disabled_without_an_explicit_otlp_endpoint(monkeypatch):
@@ -214,3 +215,36 @@ def test_metrics_exclude_health_probes_and_bound_unknown_methods():
         assert attributes["http.route"] == "/metrics-test"
     finally:
         provider.shutdown()
+
+
+
+def test_worker_tracing_is_opt_in_and_does_not_install_api_middleware(monkeypatch):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    assert configure_worker_tracing() is None
+
+    exporter=InMemorySpanExporter()
+    provider=configure_worker_tracing(
+        endpoint="http://collector:4318/v1/traces",
+        service_name="tgmate-worker-test",
+        environment="test",
+        sample_rate=1.0,
+        exporter=exporter,
+    )
+    assert provider is not None
+    try:
+        tracer=provider.get_tracer("tgmate.worker-test")
+        with tracer.start_as_current_span("worker.parent"):
+            traceparent=current_traceparent()
+            assert isinstance(traceparent,str) and len(traceparent)==55
+            assert traceparent.startswith("00-")
+        assert provider.force_flush()
+        spans=exporter.get_finished_spans()
+        assert len(spans)==1
+        assert spans[0].resource.attributes["service.name"]=="tgmate-worker-test"
+    finally:
+        provider.shutdown()
+
+
+def test_current_traceparent_is_absent_without_a_valid_active_span():
+    assert current_traceparent() is None

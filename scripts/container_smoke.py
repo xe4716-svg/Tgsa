@@ -77,6 +77,10 @@ for path,methods in expected.items():
     assert methods.issubset(paths[path]), f'missing OpenAPI methods for: {path}'
 """
         run(['exec','-T','api','python','-c',openapi_probe], 'OpenAPI runtime schema probe')
+        trace_context_schema = run(['exec','-T','db','psql','-U','postgres','-d','tgs','-Atqc',
+            "SELECT (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='account_gateway_routes' AND column_name='traceparent')::text || '|' || (SELECT count(*) FROM pg_constraint WHERE conrelid='public.account_gateway_routes'::regclass AND conname='account_gateway_routes_traceparent_format')::text"],
+            'Gateway trace context schema probe').strip()
+        assert trace_context_schema == '1|1'
         probe = "import urllib.request,urllib.error,json;\ntry: urllib.request.urlopen('http://127.0.0.1:8000/api/v1/relay/conversations')\nexcept urllib.error.HTTPError as e: assert e.code==401 and json.load(e)['success'] is False\nelse: raise AssertionError('Unauthenticated access accepted')"
         run(['exec','-T','api','python','-c',probe], 'API authorization probe')
         # Empty, mapped synthetic tenants make both optional workers exercise

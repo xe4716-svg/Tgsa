@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from app.config import settings
+from app.observability import configure_worker_tracing
 from app.security.session_vault import SessionVault
 from app.telegram.gateway_runtime import GatewayRunner, GatewayCloseUncertain
 
@@ -24,10 +25,16 @@ async def run(tenant_id,account_id):
                 installed.append(sig)
             except (NotImplementedError,RuntimeError):
                 pass
+    tracing_provider=None
     try:
+        tracing_provider=configure_worker_tracing(
+            service_name="tgmate-mtproto-gateway",
+            environment=settings.app_env,
+        )
+        tracer=tracing_provider.get_tracer("tgmate.gateway","1.0.0") if tracing_provider else None
         vault=SessionVault.from_base64(settings.session_kek_base64,settings.session_kek_id)
         async with asyncpg.create_pool(settings.database_url,min_size=1,max_size=4,command_timeout=3) as pool:
-            runner=GatewayRunner(pool,vault,'mtproto-'+str(uuid4()))
+            runner=GatewayRunner(pool,vault,'mtproto-'+str(uuid4()),tracer=tracer)
             result=await runner.run(tenant_id,account_id,stop)
         print(json.dumps({'state':'stopped','reason':result.reason,'retry_after':result.retry_after}))
         return 0 if result.reason=='STOPPED' else 2
@@ -38,7 +45,11 @@ async def run(tenant_id,account_id):
         print(json.dumps({'state':'stopped','reason':'GATEWAY_FAILED'}))
         return 2
     finally:
-        for sig in installed:loop.remove_signal_handler(sig)
+        try:
+            if tracing_provider is not None:
+                tracing_provider.shutdown()
+        finally:
+            for sig in installed:loop.remove_signal_handler(sig)
 
 
 def main(argv=None):

@@ -6,6 +6,9 @@ from uuid import uuid4
 
 import pytest
 from telethon.errors import FloodWaitError
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.telegram.gateway_material import AccountMaterial
 from app.telegram.gateway_leases import AccountLease
@@ -20,7 +23,7 @@ class Leases:
     def __init__(self):
         self.lease=AccountLease(uuid4(),uuid4(),'test',1)
         self.allowed=True;self.renewed=True;self.calls=[];self.deferred=True
-        self.conn=SimpleNamespace(execute=AsyncMock())
+        self.conn=SimpleNamespace(execute=AsyncMock(),fetchval=AsyncMock(return_value=True))
     async def acquire(self,*args):
         self.calls.append('acquire');return self.lease if self.allowed else None
     async def renew(self,*args):
@@ -184,3 +187,57 @@ async def test_disabling_current_route_disconnects_the_ready_client():
     leases.conn.fetchval.return_value=False
     assert (await asyncio.wait_for(task,1)).reason=='MATERIAL_UNAVAILABLE'
     client.disconnect.assert_awaited_once()
+
+
+
+@pytest.mark.anyio
+async def test_gateway_activation_span_uses_durable_remote_parent_and_ends_at_ready():
+    exporter=InMemorySpanExporter()
+    provider=TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    runner,leases,client,_=await setup(tracer=provider.get_tracer("tgmate.gateway-test"))
+    ready=asyncio.Event()
+    stop=asyncio.Event()
+    traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    task=asyncio.create_task(runner.run(
+        leases.lease.tenant_id,leases.lease.account_id,stop,
+        ready=ready,route_generation=7,traceparent=traceparent,
+    ))
+
+    try:
+        await asyncio.sleep(0.1)
+        if not ready.is_set():
+            if task.done():
+                result=task.result()
+                spans=exporter.get_finished_spans()
+                attributes=dict(spans[-1].attributes) if spans else {}
+                pytest.fail(
+                    f"Gateway returned before ready: {result.reason}; "
+                    f"calls={leases.calls}; span_attributes={attributes}"
+                )
+            pytest.fail(
+                f"Gateway did not become ready; calls={leases.calls}; "
+                f"connect={client.connect.await_count}; authorized={client.is_user_authorized.await_count}; "
+                f"get_me={client.get_me.await_count}"
+            )
+        spans=exporter.get_finished_spans()
+        assert len(spans)==1
+        span=spans[0]
+        assert span.name=="gateway.account.activate"
+        assert span.parent is not None
+        assert span.parent.is_remote is True
+        assert span.parent.trace_id==int("4bf92f3577b34da6a3ce929d0e0e4736",16)
+        assert span.parent.span_id==int("00f067aa0ba902b7",16)
+        assert span.attributes["gateway.route.generation"]==7
+        assert span.attributes["gateway.outcome"]=="READY"
+        assert "tenant_id" not in repr(span.attributes)
+        assert "account_id" not in repr(span.attributes)
+        assert "private-session" not in repr(span.attributes)
+        assert not span.end_time is None
+        # The activation span is already exported while the managed socket
+        # remains open; it is not held for the full connection lifetime.
+        assert not task.done()
+    finally:
+        stop.set()
+        await asyncio.wait_for(task,1)
+        provider.shutdown()

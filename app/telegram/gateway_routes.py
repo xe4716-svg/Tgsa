@@ -1,9 +1,10 @@
 """Durable desired routes; reuses gateway leases and never contains credentials."""
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from app.telegram.authorization import lock_login_authority
+from app.observability import current_traceparent
 
 
 class RouteConflict(ValueError):
@@ -15,6 +16,9 @@ class GatewayRoute:
     tenant_id: UUID
     account_id: UUID
     generation: int
+    # Correlation metadata is consumed once by the supervisor and is not part
+    # of route identity, so clearing it never restarts a healthy connection.
+    traceparent: str | None = field(default=None, compare=False, repr=False)
 
 
 class GatewayRoutes:
@@ -40,6 +44,9 @@ class GatewayRoutes:
             return dict(row) if row else None
 
     async def change(self, principal, account_id, enabled, expected_generation):
+        # Persist only the active server span. Incoming baggage/tracestate and
+        # all request headers remain outside the durable control-plane record.
+        traceparent = current_traceparent() if enabled else None
         async with self.transaction(principal.tenant_id) as conn:
             # Same lock ordering as account creation. Recheck authority after waits.
             await conn.fetchrow('SELECT id FROM tenants WHERE id=$1 FOR UPDATE', principal.tenant_id)
@@ -59,11 +66,13 @@ class GatewayRoutes:
                 count = await conn.fetchval('SELECT count(*) FROM account_gateway_routes WHERE tenant_id=$1', principal.tenant_id)
                 if count >= 1000:
                     raise RouteConflict('Route capacity reached')
-            row = await conn.fetchrow('''INSERT INTO account_gateway_routes(tenant_id,account_id,enabled)
-                VALUES($1,$2,$3) ON CONFLICT(account_id) DO UPDATE
+            row = await conn.fetchrow('''INSERT INTO account_gateway_routes(tenant_id,account_id,enabled,traceparent)
+                VALUES($1,$2,$3,$4) ON CONFLICT(account_id) DO UPDATE
                 SET enabled=EXCLUDED.enabled,generation=account_gateway_routes.generation+1,
+                    traceparent=EXCLUDED.traceparent,
                     last_reason=NULL,updated_at=clock_timestamp()
-                RETURNING account_id,enabled,generation,last_reason''', principal.tenant_id, account_id, enabled)
+                RETURNING account_id,enabled,generation,last_reason''',
+                principal.tenant_id, account_id, enabled, traceparent)
             await conn.execute('''INSERT INTO audit_logs(tenant_id,actor_user_id,action,resource_type,resource_id,details)
                 VALUES($1,$2,'GATEWAY_ROUTE_CHANGED','telegram_account',$3,
                 jsonb_build_object('enabled',$4::boolean,'generation',$5::bigint))''',
@@ -73,12 +82,29 @@ class GatewayRoutes:
 
     async def enabled(self, tenant_id):
         async with self.transaction(tenant_id) as conn:
-            rows = await conn.fetch('''SELECT r.account_id,r.generation FROM account_gateway_routes r
+            rows = await conn.fetch('''SELECT r.account_id,r.generation,r.traceparent
+                FROM account_gateway_routes r
                 JOIN tenants t ON t.id=r.tenant_id AND t.status='ACTIVE'
                 JOIN telegram_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
                 WHERE r.tenant_id=$1 AND r.enabled AND a.status IN ('AUTHORIZED','ACTIVE')
                 ORDER BY r.account_id''', tenant_id)
-            return [GatewayRoute(tenant_id, r['account_id'], r['generation']) for r in rows]
+            routes = []
+            for row in rows:
+                traceparent = row['traceparent']
+                if traceparent is not None:
+                    # Conditional UPDATE is an atomic one-time claim. It locks
+                    # only rows carrying context, not every active route on each
+                    # supervisor poll. A competing poll receives no parent.
+                    claimed = await conn.fetchval('''UPDATE account_gateway_routes
+                        SET traceparent=NULL
+                        WHERE tenant_id=$1 AND account_id=$2 AND generation=$3 AND traceparent=$4
+                        RETURNING true''',
+                        tenant_id, row['account_id'], row['generation'], traceparent)
+                    if not claimed:
+                        traceparent = None
+                routes.append(GatewayRoute(
+                    tenant_id, row['account_id'], row['generation'], traceparent))
+            return routes
 
     async def pause(self, route, reason):
         # CAS prevents an old lifecycle from overwriting a newer operator action.
@@ -88,7 +114,7 @@ class GatewayRoutes:
         if reason not in reasons:
             reason = 'GATEWAY_FAILED'
         async with self.transaction(route.tenant_id) as conn:
-            changed = await conn.fetchval('''UPDATE account_gateway_routes SET enabled=false,
+            changed = await conn.fetchval('''UPDATE account_gateway_routes SET enabled=false,traceparent=NULL,
                 generation=generation+1,last_reason=$4,updated_at=clock_timestamp()
                 WHERE tenant_id=$1 AND account_id=$2 AND generation=$3 AND enabled RETURNING true''',
                 route.tenant_id, route.account_id, route.generation, reason)
