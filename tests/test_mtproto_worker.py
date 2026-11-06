@@ -24,6 +24,7 @@ async def test_worker_closes_pool_and_does_not_retry(monkeypatch,capsys,reason,c
         def __init__(self,*args,**kwargs):pass
         async def run(self,*args):calls.append(True);return GatewayResult(reason,120)
     monkeypatch.setattr(mtproto.asyncpg,'create_pool',pool)
+    monkeypatch.setattr(mtproto,'configure_worker_tracing',lambda **kwargs:None)
     monkeypatch.setattr(mtproto,'GatewayRunner',Runner)
     monkeypatch.setattr(mtproto.SessionVault,'from_base64',lambda *args:object())
     assert await mtproto.run(uuid4(),uuid4())==code
@@ -35,6 +36,7 @@ async def test_worker_closes_pool_and_does_not_retry(monkeypatch,capsys,reason,c
 async def test_worker_sanitizes_database_failures(monkeypatch,capsys):
     def fail(*args,**kwargs):raise OSError('private-password-and-host')
     monkeypatch.setattr(mtproto.asyncpg,'create_pool',fail)
+    monkeypatch.setattr(mtproto,'configure_worker_tracing',lambda **kwargs:None)
     monkeypatch.setattr(mtproto.SessionVault,'from_base64',lambda *args:object())
     assert await mtproto.run(uuid4(),uuid4())==2
     output=capsys.readouterr().out
@@ -53,6 +55,7 @@ async def test_uncertain_disconnect_is_fatal_and_sanitized(monkeypatch,capsys):
         def __init__(self,*args,**kwargs):pass
         async def run(self,*args):raise GatewayCloseUncertain('private connection detail')
     monkeypatch.setattr(mtproto.asyncpg,'create_pool',pool)
+    monkeypatch.setattr(mtproto,'configure_worker_tracing',lambda **kwargs:None)
     monkeypatch.setattr(mtproto,'GatewayRunner',Runner)
     monkeypatch.setattr(mtproto.SessionVault,'from_base64',lambda *args:object())
     assert await mtproto.run(uuid4(),uuid4())==3
