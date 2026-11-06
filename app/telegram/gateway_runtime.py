@@ -177,7 +177,10 @@ class GatewayRunner:
             return GatewayResult('GATEWAY_FAILED')
         finally:
             if self.commands is not None and lease is not None:
-                self.commands.clear_queue_metrics(lease)
+                try:
+                    self.commands.clear_queue_metrics(lease)
+                except Exception:
+                    pass
             lost.set()
             if monitor:
                 monitor.cancel()
