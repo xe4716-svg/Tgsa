@@ -27,7 +27,7 @@ class GatewayCommandExecutor:
         self.tracer = tracer or trace.get_tracer("tgmate.gateway.commands", "1.0.0")
         self.metrics = metrics
         self.metrics_interval = metrics_interval
-        self._last_metrics_sample = time.monotonic()
+        self._last_metrics_sample = 0.0
 
     async def _sample_queue_metrics(self, lease, generation, controlled, timeout):
         if self.metrics is None or time.monotonic() - self._last_metrics_sample < self.metrics_interval:
