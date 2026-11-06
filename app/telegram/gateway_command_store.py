@@ -3,10 +3,12 @@
 This module never loads Telegram session material and never creates a Telethon
 client. The caller must already own the account Gateway lease.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from typing import Any
 from uuid import UUID
+
+from app.telemetry import current_traceparent
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,7 @@ class GatewayCommand:
     claim_worker_id: str
     claim_fencing_token: int
     claim_until: Any
+    traceparent: str | None = field(default=None, compare=False, repr=False)
 
 
 class GatewayCommandStore:
@@ -50,12 +53,13 @@ class GatewayCommandStore:
     ) -> UUID:
         row = await self._call(
             tenant_id,
-            """SELECT public.submit_gateway_account_command($1,$2,$3,$4,$5) AS id""",
+            """SELECT public.submit_gateway_account_command_with_trace($1,$2,$3,$4,$5,$6) AS id""",
             account_id,
             route_generation,
             operation_key,
             destination_peer_id,
             text,
+            current_traceparent(),
         )
         if row is None or row["id"] is None:
             raise RuntimeError("Gateway command submission returned no identifier")
@@ -91,6 +95,7 @@ class GatewayCommandStore:
             claim_worker_id=row["claim_worker_id"],
             claim_fencing_token=row["claim_fencing_token"],
             claim_until=row["claim_until"],
+            traceparent=row["traceparent"],
         )
 
     async def mark_dispatch_started(
