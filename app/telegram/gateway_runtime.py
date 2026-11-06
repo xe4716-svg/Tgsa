@@ -27,7 +27,7 @@ class GatewayResult:
 
 class GatewayRunner:
     def __init__(self,pool,vault,worker_id,*,ttl=30,heartbeat=5,control_timeout=3,rpc_timeout=10,close_timeout=5,
-                 leases=None,loader=None,client_factory=None,command_store=None,command_sender=None,command_tracer=None):
+                 leases=None,loader=None,client_factory=None,command_store=None,command_sender=None,command_tracer=None,command_metrics=None):
         GatewayLeases._ttl(ttl)
         if not (0<heartbeat<ttl/3 and 0<control_timeout<ttl/3 and 0<rpc_timeout<ttl/2 and close_timeout>0):
             raise ValueError('Gateway timeouts must leave a safe lease margin')
@@ -40,7 +40,7 @@ class GatewayRunner:
         self._running=False
         if (command_store is None) != (command_sender is None):
             raise ValueError('Command store and explicit transport must be supplied together')
-        self.commands = GatewayCommandExecutor(command_store, command_sender, tracer=command_tracer) if command_store is not None else None
+        self.commands = GatewayCommandExecutor(command_store, command_sender, tracer=command_tracer, metrics=command_metrics) if command_store is not None else None
 
     async def run(self,tenant_id,account_id,stop,*,ready=None,route_generation=None):
         if self._running:
@@ -176,6 +176,8 @@ class GatewayRunner:
         except Exception:
             return GatewayResult('GATEWAY_FAILED')
         finally:
+            if self.commands is not None and lease is not None:
+                self.commands.clear_queue_metrics(lease)
             lost.set()
             if monitor:
                 monitor.cancel()
