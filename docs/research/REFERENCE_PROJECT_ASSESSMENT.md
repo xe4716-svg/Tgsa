@@ -500,3 +500,15 @@ pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page 
 - [Gateway command safety run 42206494871](https://github.com/xe4716-svg/Tgsa/actions/runs/42206494871)：success；**321 passed / 32 skipped**。
 - PR #50 仅完成本地结构化日志和 trace correlation PoC；没有部署 Collector/Loki/ELK、没有配置生产 retention/auth，也没有生产 command sender/AccountBroadcast caller。无 Telegram RPC/message。
 - PR #49 durable command trace PoC 和 PR #50 structured log PoC 均未合并，等待非作者正式 Review；PR #28 仍需生产 sender、AccountBroadcast adapter、dedicated worker 和 operator reconciliation/resume 验收。
+
+
+## 2026-11-06｜Fenced Gateway queue and command metrics — PR #51
+
+- [PR #51](https://github.com/xe4716-svg/Tgsa/pull/51) 已完成 exact-head CI 并转为 Ready for Review；分支 `feat/tgm-022-gateway-queue-metrics`，HEAD `d7d0d1179937dae9cf7cb0642d9105859c25c07c`，base 为 PR #50 分支；未合并，正式 Review 尚未提交。
+- 新增 migration `019_gateway_command_metrics.sql`，提供 SECURITY DEFINER 聚合查询，必须验证 executor capability、enabled route generation、worker ID、fencing token 和 live lease；只返回 queued/claimed/unknown/flood_wait counts 与 oldest queued age。executor 仅获函数执行权限，没有新增命令表 SELECT 权限。
+- 新增 opt-in OTLP metrics provider（`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` 或通用 `OTEL_EXPORTER_OTLP_ENDPOINT`）。采集 bounded command execution count/duration、queue age、FloodWait duration、UNKNOWN count、aggregate queue depth 和 oldest queued age；account IDs 只作进程内 snapshot key，不作 metric labels。
+- 每个活动 executor 最多每 15 秒采样一次队列；metrics sampling/recording/cleanup 为 best effort，不阻塞命令发送或 disconnect。
+- [Root Integration run 42208124867](https://github.com/xe4716-svg/Tgsa/actions/runs/42208124867)：**3/3 jobs success**；Root **332 passed / 24 skipped**；notification/login **27 passed**；preserved V2 **208 passed**；Compose readiness、隔离 secrets、schema replay、authorization smoke 通过。
+- [Gateway command safety run 42208124916](https://github.com/xe4716-svg/Tgsa/actions/runs/42208124916)：success；**324 passed / 32 skipped**，包括 disposable PostgreSQL migration 019、lease/fencing gated metrics access、route generation rejection、metrics aggregation/cardinality 测试。
+- PR #51 仅为队列/命令指标 PoC，没有部署 Collector、retention、dashboard 或生产 OTLP endpoint；当前 Gateway worker 仍无生产 command store/transport/submit_text caller；没有 Telegram RPC/message。
+- PR #49/#50/#51 均未合并，等待非作者正式 Review。后续：本地/隔离 Compose Collector→Tempo/Prometheus/Grafana end-to-end PoC；生产 Collector auth/retention/dashboard 仍须根据真实服务器、网络和存储方案决策，不预设云厂商。
