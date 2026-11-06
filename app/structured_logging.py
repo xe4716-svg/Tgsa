@@ -46,7 +46,7 @@ class SafeJsonFormatter(logging.Formatter):
         payload: dict[str, object] = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "level": record.levelname,
-            "event": event if event in _SAFE_EVENTS else "application.log",
+            "event": event if isinstance(event, str) and event in _SAFE_EVENTS else "application.log",
         }
 
         trace_id = getattr(record, "trace_id", None)
@@ -57,11 +57,11 @@ class SafeJsonFormatter(logging.Formatter):
             payload["span_id"] = span_id
 
         command_kind = getattr(record, "command_kind", None)
-        if command_kind in _SAFE_COMMAND_KINDS:
+        if isinstance(command_kind, str) and command_kind in _SAFE_COMMAND_KINDS:
             payload["command_kind"] = command_kind
 
         outcome = getattr(record, "outcome", None)
-        if outcome in _SAFE_OUTCOMES:
+        if isinstance(outcome, str) and outcome in _SAFE_OUTCOMES:
             payload["outcome"] = outcome
 
         generation = getattr(record, "route_generation", None)
