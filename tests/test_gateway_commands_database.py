@@ -82,6 +82,8 @@ def test_command_roles_mapping_fencing_recovery():
                         assert sum(c is not None for c in claims)==1
                         assert command.payload == {'text':'hello'}
                         assert command.traceparent == expected_traceparent
+                        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                            await e.read_queue_metrics(tenant,account,1,'gateway-test',6)
                         queue_snapshot=await e.read_queue_metrics(tenant,account,1,'gateway-test',7)
                         assert queue_snapshot['claimed_count']==1
                         assert queue_snapshot['queued_count']==0
@@ -92,6 +94,8 @@ def test_command_roles_mapping_fencing_recovery():
                         assert not await e.mark_dispatch_started(*args)
                         owner.execute("UPDATE telegram_accounts SET status='ACTIVE' WHERE id=%s", (account,))
                         owner.execute('UPDATE account_gateway_routes SET generation=2 WHERE account_id=%s',(account,))
+                        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                            await e.read_queue_metrics(tenant,account,1,'gateway-test',7)
                         assert not await e.mark_dispatch_started(*args)
                         owner.execute('UPDATE account_gateway_routes SET generation=1 WHERE account_id=%s',(account,))
                         assert await e.mark_dispatch_started(*args)
