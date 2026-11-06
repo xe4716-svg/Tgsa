@@ -205,7 +205,16 @@ async def test_gateway_activation_span_uses_durable_remote_parent_and_ends_at_re
     ))
 
     try:
-        await asyncio.wait_for(ready.wait(),1)
+        await asyncio.sleep(0.1)
+        if not ready.is_set():
+            if task.done():
+                result=task.result()
+                pytest.fail(f"Gateway returned before ready: {result.reason}; calls={leases.calls}")
+            pytest.fail(
+                f"Gateway did not become ready; calls={leases.calls}; "
+                f"connect={client.connect.await_count}; authorized={client.is_user_authorized.await_count}; "
+                f"get_me={client.get_me.await_count}"
+            )
         spans=exporter.get_finished_spans()
         assert len(spans)==1
         span=spans[0]
