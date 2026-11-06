@@ -63,12 +63,17 @@ class EnabledConnection:
     def transaction(self): return self
 
     async def execute(self, query, *args):
-        if "UPDATE account_gateway_routes SET traceparent=NULL" in query:
+        return "OK"
+
+    async def fetchval(self, query, *args):
+        if "UPDATE account_gateway_routes" in query and "traceparent=NULL" in query:
             assert args[:3]==(self.tenant_id,self.account_id,1)
-            assert args[3]==self.traceparent
+            if args[3]!=self.traceparent:
+                return None
             self.traceparent=None
             self.updates+=1
-        return "OK"
+            return True
+        raise AssertionError("Unexpected fetchval query")
 
     async def fetch(self, query, *args):
         return [{
