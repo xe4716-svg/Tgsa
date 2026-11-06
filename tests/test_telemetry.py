@@ -58,6 +58,6 @@ def test_worker_sampler_rejects_invalid_rate(monkeypatch):
     try:
         configure_worker_tracing()
     except RuntimeError as exc:
-        assert "0 and 1" in str(exc)
+        assert "between 0 and 1" in str(exc)
     else:
         raise AssertionError("invalid sample rate was accepted")
