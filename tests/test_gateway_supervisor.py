@@ -172,6 +172,7 @@ async def test_route_trace_context_is_forwarded_once_without_changing_route_iden
     # the same route generation or close its healthy connection.
     untraced=replace(traced,traceparent=None)
     assert traced==untraced
+    store.rows[tenant][0]=untraced
     await supervisor.step()
     assert factory.calls==[original]
     await supervisor.close()
