@@ -15,9 +15,11 @@ def anyio_backend():return 'asyncio'
 @pytest.mark.anyio
 @pytest.mark.parametrize('failure,code',[(None,0),(OSError('private database password'),2),(GatewayCloseUncertain('private socket'),3)])
 async def test_gateway_worker_resource_cleanup_and_sanitized_exit(monkeypatch,capsys,failure,code):
-    closed=[];restored=[];captured=[];runner_kwargs=[];shutdowns=[];logging_calls=[]
+    closed=[];restored=[];captured=[];runner_kwargs=[];shutdowns=[];logging_calls=[];metrics_calls=[];metrics_shutdowns=[]
     tracer=object()
     provider=SimpleNamespace(get_tracer=lambda *args:tracer,shutdown=lambda:shutdowns.append(True))
+    command_metrics=object()
+    metrics_provider=SimpleNamespace(get_meter=lambda *args:object(),shutdown=lambda:metrics_shutdowns.append(True))
     @asynccontextmanager
     async def pool(*args,**kwargs):
         try:yield object()
@@ -34,6 +36,8 @@ async def test_gateway_worker_resource_cleanup_and_sanitized_exit(monkeypatch,ca
     monkeypatch.setattr(gateway,'install_signal_handlers',lambda stop:[lambda:restored.append(True)])
     monkeypatch.setattr(gateway,'configure_structured_logging',lambda **kwargs:logging_calls.append(True))
     monkeypatch.setattr(gateway,'configure_worker_tracing',lambda **kwargs:provider)
+    monkeypatch.setattr(gateway,'configure_worker_metrics',lambda **kwargs:(metrics_calls.append(True) or metrics_provider))
+    monkeypatch.setattr(gateway,'GatewayCommandMetrics',lambda meter:command_metrics)
     monkeypatch.setattr(gateway,'GatewayRunner',Runner)
     monkeypatch.setattr(gateway.SessionVault,'from_base64',lambda *a:object())
     monkeypatch.setattr(gateway,'GatewaySupervisor',Supervisor)
@@ -41,9 +45,10 @@ async def test_gateway_worker_resource_cleanup_and_sanitized_exit(monkeypatch,ca
     assert await gateway.run(tenants,10,3)==code
     assert closed==[True] and restored==[True]
     assert captured==[(tenants,{'capacity':10,'per_tenant':3})]
-    assert runner_kwargs==[{'command_tracer':tracer}]
+    assert runner_kwargs==[{'command_tracer':tracer,'command_metrics':command_metrics}]
     assert shutdowns==[True]
     assert logging_calls==[True]
+    assert metrics_calls==[True] and metrics_shutdowns==[True]
     assert 'private' not in capsys.readouterr().out
 
 

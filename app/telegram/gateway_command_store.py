@@ -25,6 +25,7 @@ class GatewayCommand:
     claim_fencing_token: int
     claim_until: Any
     traceparent: str | None = field(default=None, compare=False, repr=False)
+    created_at: Any = field(default=None, compare=False, repr=False)
 
 
 class GatewayCommandStore:
@@ -96,7 +97,28 @@ class GatewayCommandStore:
             claim_fencing_token=row["claim_fencing_token"],
             claim_until=row["claim_until"],
             traceparent=row["traceparent"],
+            created_at=row["created_at"],
         )
+
+    async def read_queue_metrics(
+        self,
+        tenant_id: UUID,
+        account_id: UUID,
+        route_generation: int,
+        worker_id: str,
+        fencing_token: int,
+    ) -> dict[str, Any]:
+        row = await self._call(
+            tenant_id,
+            """SELECT * FROM public.read_gateway_account_command_metrics($1,$2,$3,$4)""",
+            account_id,
+            route_generation,
+            worker_id,
+            fencing_token,
+        )
+        if row is None:
+            return {}
+        return dict(row)
 
     async def mark_dispatch_started(
         self, tenant_id: UUID, command_id: UUID, worker_id: str, fencing_token: int

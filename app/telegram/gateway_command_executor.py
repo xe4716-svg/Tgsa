@@ -5,6 +5,8 @@ Any exception after dispatch is conservatively unknown; never retry that RPC.
 """
 import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
@@ -20,18 +22,61 @@ class CommandResultUncertain(RuntimeError):
 
 
 class GatewayCommandExecutor:
-    def __init__(self, store, sender, *, tracer=None):
+    def __init__(self, store, sender, *, tracer=None, metrics=None, metrics_interval=15.0):
         self.store, self.sender = store, sender
         self.tracer = tracer or trace.get_tracer("tgmate.gateway.commands", "1.0.0")
+        self.metrics = metrics
+        self.metrics_interval = metrics_interval
+        self._last_metrics_sample = 0.0
+
+    async def _sample_queue_metrics(self, lease, generation, controlled, timeout):
+        if self.metrics is None or time.monotonic() - self._last_metrics_sample < self.metrics_interval:
+            return
+        self._last_metrics_sample = time.monotonic()
+        try:
+            snapshot = await controlled(
+                lambda: self.store.read_queue_metrics(
+                    lease.tenant_id, lease.account_id, generation,
+                    lease.worker_id, lease.fencing_token,
+                ),
+                timeout,
+            )
+            self.metrics.set_queue_snapshot(str(lease.account_id), snapshot)
+        except Exception:
+            # Telemetry sampling must never stop or delay command processing.
+            return
+
+    def clear_queue_metrics(self, lease):
+        if self.metrics is not None:
+            self.metrics.clear_queue_snapshot(str(lease.account_id))
 
     async def execute_one(self, lease, generation, client, controlled, timeout):
         scope = (lease.tenant_id, lease.account_id, lease.worker_id, lease.fencing_token)
         _, unknown = await controlled(lambda: self.store.recover_expired(*scope), timeout)
         if unknown:
             raise CommandResultUncertain('Recovered uncertain dispatch')
+        await self._sample_queue_metrics(lease, generation, controlled, timeout)
         command = await controlled(lambda: self.store.claim_next(*scope), timeout)
         if command is None:
             return False
+
+        started_at = time.perf_counter()
+        created_at = getattr(command, "created_at", None)
+        queue_age = None
+        if isinstance(created_at, datetime):
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            queue_age = max(0.0, (datetime.now(timezone.utc) - created_at).total_seconds())
+
+        def record_metrics(outcome):
+            if self.metrics is not None:
+                try:
+                    self.metrics.record_execution(
+                        command.operation_kind, outcome,
+                        time.perf_counter() - started_at, queue_age,
+                    )
+                except Exception:
+                    pass
 
         parent_context = extract_trace_context(getattr(command, "traceparent", None))
         with self.tracer.start_as_current_span(
@@ -49,6 +94,7 @@ class GatewayCommandExecutor:
                 result = await self._dispatch(command, lease, generation, client, controlled, timeout)
                 outcome = "SUCCEEDED" if result else "IDLE"
                 span.set_attribute("gateway.command.outcome", outcome)
+                record_metrics("SUCCEEDED")
                 logger.info(
                     "gateway command completed",
                     extra={
@@ -63,6 +109,12 @@ class GatewayCommandExecutor:
                 span.set_attribute("gateway.command.outcome", "FLOOD_WAIT")
                 retry_after = max(1, int(exc.seconds))
                 span.set_attribute("gateway.retry_after_seconds", retry_after)
+                record_metrics("FLOOD_WAIT")
+                if self.metrics is not None:
+                    try:
+                        self.metrics.record_flood_wait(retry_after)
+                    except Exception:
+                        pass
                 logger.warning(
                     "gateway command flood wait",
                     extra={
@@ -76,6 +128,7 @@ class GatewayCommandExecutor:
                 raise
             except CommandResultUncertain:
                 span.set_attribute("gateway.command.outcome", "UNKNOWN")
+                record_metrics("UNKNOWN")
                 logger.warning(
                     "gateway command result unknown",
                     extra={
@@ -89,6 +142,7 @@ class GatewayCommandExecutor:
             except BaseException as exc:
                 span.set_attribute("gateway.command.outcome", "ERROR")
                 span.set_attribute("exception.type", type(exc).__name__)
+                record_metrics("ERROR")
                 logger.error(
                     "gateway command failed",
                     extra={

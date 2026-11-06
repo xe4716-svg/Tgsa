@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -8,8 +9,11 @@ from telethon.errors import FloodWaitError
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from app.telegram.gateway_command_executor import GatewayCommandExecutor, CommandResultUncertain
+from app.gateway_metrics import GatewayCommandMetrics
 from app.telegram.gateway_leases import AccountLease
 from test_gateway_runtime import setup
 
@@ -23,9 +27,14 @@ def fixture():
     command=SimpleNamespace(id=uuid4(),tenant_id=lease.tenant_id,account_id=lease.account_id,
         route_generation=3,claim_worker_id='test',claim_fencing_token=7,
         operation_kind='preflight_send_text',payload={'text':'synthetic'},destination_peer_id=123,
-        traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01')
+        traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        created_at=datetime.now(timezone.utc)-timedelta(seconds=4))
     store=SimpleNamespace(recover_expired=AsyncMock(return_value=(0,0)),claim_next=AsyncMock(return_value=command),
-        mark_dispatch_started=AsyncMock(return_value=True),finish=AsyncMock(return_value=True))
+        mark_dispatch_started=AsyncMock(return_value=True),finish=AsyncMock(return_value=True),
+        read_queue_metrics=AsyncMock(return_value={
+            "queued_count":2,"claimed_count":1,"unknown_count":0,"flood_wait_count":0,
+            "oldest_queued_age_seconds":6.0,
+        }))
     return lease,command,store,AsyncMock(return_value=42)
 
 
@@ -132,5 +141,43 @@ async def test_command_consumer_span_uses_persisted_remote_parent_and_excludes_p
         rendered=repr(span.attributes)
         for secret in ("synthetic","123",str(lease.tenant_id),str(lease.account_id),str(command.id)):
             assert secret not in rendered
+    finally:
+        provider.shutdown()
+
+
+
+@pytest.mark.anyio
+async def test_executor_records_low_cardinality_command_and_queue_metrics():
+    lease,command,store,sender=fixture()
+    reader=InMemoryMetricReader()
+    provider=MeterProvider(metric_readers=[reader])
+    metrics=GatewayCommandMetrics(provider.get_meter("gateway-command-metrics-test"))
+    try:
+        executor=GatewayCommandExecutor(store,sender,metrics=metrics,metrics_interval=0)
+        assert await executor.execute_one(lease,3,object(),controlled,1)
+        store.read_queue_metrics.assert_awaited_once_with(
+            lease.tenant_id,lease.account_id,3,lease.worker_id,lease.fencing_token
+        )
+        data=reader.get_metrics_data()
+        found={
+            metric.name:metric
+            for resource in data.resource_metrics
+            for scope in resource.scope_metrics
+            for metric in scope.metrics
+        }
+        executions=found["tgmate.gateway.command.executions"].data.data_points
+        assert len(executions)==1
+        assert executions[0].attributes=={"command_kind":"preflight_send_text","outcome":"SUCCEEDED"}
+        queue=found["tgmate.gateway.command.queue.depth"].data.data_points
+        values={point.attributes["state"]:point.value for point in queue}
+        assert values=={"queued":2,"claimed":1,"unknown":0,"flood_wait":0}
+        oldest=found["tgmate.gateway.command.queue.oldest_age"].data.data_points
+        assert oldest[0].value==6.0
+        queue_age=found["tgmate.gateway.command.queue.age"].data.data_points
+        assert len(queue_age)==1 and queue_age[0].count==1
+        for metric in found.values():
+            for point in metric.data.data_points:
+                assert "account_id" not in point.attributes
+                assert "tenant_id" not in point.attributes
     finally:
         provider.shutdown()
