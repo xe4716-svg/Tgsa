@@ -87,18 +87,23 @@ class GatewayRoutes:
                 JOIN tenants t ON t.id=r.tenant_id AND t.status='ACTIVE'
                 JOIN telegram_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
                 WHERE r.tenant_id=$1 AND r.enabled AND a.status IN ('AUTHORIZED','ACTIVE')
-                ORDER BY r.account_id
-                FOR UPDATE OF r''', tenant_id)
+                ORDER BY r.account_id''', tenant_id)
             routes = []
             for row in rows:
-                # Claim the API->worker context exactly once. The row lock makes
-                # this safe when multiple supervisor processes poll the tenant.
-                if row['traceparent'] is not None:
-                    await conn.execute('''UPDATE account_gateway_routes SET traceparent=NULL
-                        WHERE tenant_id=$1 AND account_id=$2 AND generation=$3 AND traceparent=$4''',
-                        tenant_id, row['account_id'], row['generation'], row['traceparent'])
+                traceparent = row['traceparent']
+                if traceparent is not None:
+                    # Conditional UPDATE is an atomic one-time claim. It locks
+                    # only rows carrying context, not every active route on each
+                    # supervisor poll. A competing poll receives no parent.
+                    claimed = await conn.fetchval('''UPDATE account_gateway_routes
+                        SET traceparent=NULL
+                        WHERE tenant_id=$1 AND account_id=$2 AND generation=$3 AND traceparent=$4
+                        RETURNING true''',
+                        tenant_id, row['account_id'], row['generation'], traceparent)
+                    if not claimed:
+                        traceparent = None
                 routes.append(GatewayRoute(
-                    tenant_id, row['account_id'], row['generation'], row['traceparent']))
+                    tenant_id, row['account_id'], row['generation'], traceparent))
             return routes
 
     async def pause(self, route, reason):
