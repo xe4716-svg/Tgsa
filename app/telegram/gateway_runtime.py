@@ -7,6 +7,10 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+from opentelemetry import context as otel_context, trace
+from opentelemetry.trace import SpanKind
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
 from telethon.errors import FloodWaitError
 
 from app.telegram.client_factory import create_client
@@ -26,7 +30,7 @@ class GatewayResult:
 
 class GatewayRunner:
     def __init__(self,pool,vault,worker_id,*,ttl=30,heartbeat=5,control_timeout=3,rpc_timeout=10,close_timeout=5,
-                 leases=None,loader=None,client_factory=None):
+                 leases=None,loader=None,client_factory=None,tracer=None):
         GatewayLeases._ttl(ttl)
         if not (0<heartbeat<ttl/3 and 0<control_timeout<ttl/3 and 0<rpc_timeout<ttl/2 and close_timeout>0):
             raise ValueError('Gateway timeouts must leave a safe lease margin')
@@ -36,9 +40,55 @@ class GatewayRunner:
         self.vault,self.worker_id=vault,worker_id
         self.ttl,self.heartbeat,self.control_timeout=ttl,heartbeat,control_timeout
         self.rpc_timeout,self.close_timeout=rpc_timeout,close_timeout
+        self.tracer=tracer or trace.get_tracer("tgmate.gateway","1.0.0")
         self._running=False
 
-    async def run(self,tenant_id,account_id,stop,*,ready=None,route_generation=None):
+    async def run(self,tenant_id,account_id,stop,*,ready=None,route_generation=None,traceparent=None):
+        # The persisted parent is consumed once by GatewayRoutes.enabled().
+        # Export only a short activation span; the live socket may run for hours.
+        parent_context = (
+            TraceContextTextMapPropagator().extract({"traceparent": traceparent})
+            if isinstance(traceparent, str) else None
+        )
+        span = self.tracer.start_span(
+            "gateway.account.activate",
+            context=parent_context,
+            kind=SpanKind.CONSUMER,
+            record_exception=False,
+            set_status_on_exception=False,
+        )
+        token = otel_context.attach(trace.set_span_in_context(span, parent_context))
+        ended = False
+
+        def finish(outcome):
+            nonlocal ended
+            if ended:
+                return
+            if route_generation is not None:
+                span.set_attribute("gateway.route.generation", route_generation)
+            span.set_attribute("gateway.outcome", outcome)
+            span.end()
+            otel_context.detach(token)
+            ended = True
+
+        try:
+            result = await self._run_lifecycle(
+                tenant_id, account_id, stop, ready=ready,
+                route_generation=route_generation,
+                on_ready=lambda: finish("READY"),
+            )
+            finish(result.reason)
+            return result
+        except GatewayCloseUncertain:
+            finish("DISCONNECT_UNCERTAIN")
+            raise
+        except BaseException:
+            finish("ERROR")
+            raise
+        finally:
+            finish("FAILED")
+
+    async def _run_lifecycle(self,tenant_id,account_id,stop,*,ready=None,route_generation=None,on_ready=None):
         if self._running:
             raise RuntimeError('Runner already owns an account lifecycle')
         self._running=True
@@ -115,6 +165,7 @@ class GatewayRunner:
             if user is None or getattr(user,'id',None)!=material.telegram_user_id:
                 return GatewayResult('IDENTITY_MISMATCH')
             if ready is not None:ready.set()
+            if on_ready is not None:on_ready()
             stopped=asyncio.create_task(stop.wait())
             invalid=asyncio.create_task(lost.wait())
             # Telethon's disconnected future is owned by Telethon: never cancel
