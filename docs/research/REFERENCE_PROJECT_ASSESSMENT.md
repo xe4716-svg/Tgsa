@@ -489,3 +489,14 @@ pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page 
 - [Gateway command safety run 42205615045](https://github.com/xe4716-svg/Tgsa/actions/runs/42205615045)：成功；**318 passed / 32 skipped**，包括 disposable PostgreSQL command-role integration，实际验证 migration 018、traceparent 持久化、幂等 retry 保留原 parent、claim propagation 和 fake command transport。
 - 重要范围边界：PR #28 当前 Gateway worker 尚未安装 production command store/transport，仓库也没有 production `submit_text` caller。PR #49 验证 durable queue context + injected executor tracing，不代表生产 command sender 或 Telegram broadcast 已接通。没有真实 Telegram RPC/message。
 - PR #49 当前 Open + Ready for Review，未合并；需非作者正式 Review。后续：将 command trace helper 与 PR #48 API/Gateway activation tracing 整合，接入真实 AccountBroadcast producer/transport 前先完成 PR #28 的 sender/adapter 安全验收；随后再做 queue depth/age/FloodWait/UNKNOWN metrics 与 trace-correlated structured logs。
+
+
+## 2026-11-06｜Trace-correlated safe JSON logs — PR #50
+
+- [PR #50](https://github.com/xe4716-svg/Tgsa/pull/50) 已完成 exact-head CI 并转为 Ready for Review；分支 `feat/tgm-022-trace-correlated-logs`，HEAD `934d2fdedc0a565648094452a3629d2b5153709b`，base 为 PR #49 分支；未合并，正式 Review 尚未提交。
+- 新增 allowlisted JSON formatter + trace context filter，Gateway worker 初始化时配置 logger。只写 active span trace_id/span_id、固定 event name、bounded command kind/outcome、route generation、FloodWait retry seconds 和 sanitized exception class；formatter 不序列化 free-form message/args/exception text/任意 extra fields。
+- Gateway command executor 在成功、FloodWait、UNKNOWN、sanitized failure 路径写固定日志事件；不记录消息正文、tenant/account/peer IDs、operation key、session/proxy、URL 或 request headers。无 active span 时仍输出安全结构化事件但不附 trace IDs。
+- [Root Integration run 42206494880](https://github.com/xe4716-svg/Tgsa/actions/runs/42206494880)：**3/3 jobs success**；Root **329 passed / 24 skipped**；notification/login **27 passed**；preserved V2 **208 passed**；Compose readiness、隔离 secrets、migration replay、authorization smoke 通过。
+- [Gateway command safety run 42206494871](https://github.com/xe4716-svg/Tgsa/actions/runs/42206494871)：success；**321 passed / 32 skipped**。
+- PR #50 仅完成本地结构化日志和 trace correlation PoC；没有部署 Collector/Loki/ELK、没有配置生产 retention/auth，也没有生产 command sender/AccountBroadcast caller。无 Telegram RPC/message。
+- PR #49 durable command trace PoC 和 PR #50 structured log PoC 均未合并，等待非作者正式 Review；PR #28 仍需生产 sender、AccountBroadcast adapter、dedicated worker 和 operator reconciliation/resume 验收。
