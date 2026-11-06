@@ -209,7 +209,12 @@ async def test_gateway_activation_span_uses_durable_remote_parent_and_ends_at_re
         if not ready.is_set():
             if task.done():
                 result=task.result()
-                pytest.fail(f"Gateway returned before ready: {result.reason}; calls={leases.calls}")
+                spans=exporter.get_finished_spans()
+                attributes=dict(spans[-1].attributes) if spans else {}
+                pytest.fail(
+                    f"Gateway returned before ready: {result.reason}; "
+                    f"calls={leases.calls}; span_attributes={attributes}"
+                )
             pytest.fail(
                 f"Gateway did not become ready; calls={leases.calls}; "
                 f"connect={client.connect.await_count}; authorized={client.is_user_authorized.await_count}; "
