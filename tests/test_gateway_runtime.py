@@ -6,6 +6,9 @@ from uuid import uuid4
 
 import pytest
 from telethon.errors import FloodWaitError
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.telegram.gateway_material import AccountMaterial
 from app.telegram.gateway_leases import AccountLease
@@ -184,3 +187,44 @@ async def test_disabling_current_route_disconnects_the_ready_client():
     leases.conn.fetchval.return_value=False
     assert (await asyncio.wait_for(task,1)).reason=='MATERIAL_UNAVAILABLE'
     client.disconnect.assert_awaited_once()
+
+
+
+@pytest.mark.anyio
+async def test_gateway_activation_span_uses_durable_remote_parent_and_ends_at_ready():
+    exporter=InMemorySpanExporter()
+    provider=TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    runner,leases,client,_=await setup(tracer=provider.get_tracer("tgmate.gateway-test"))
+    ready=asyncio.Event()
+    traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    task=asyncio.create_task(runner.run(
+        leases.lease.tenant_id,leases.lease.account_id,asyncio.Event(),
+        ready=ready,route_generation=7,traceparent=traceparent,
+    ))
+
+    try:
+        await asyncio.wait_for(ready.wait(),1)
+        spans=exporter.get_finished_spans()
+        assert len(spans)==1
+        span=spans[0]
+        assert span.name=="gateway.account.activate"
+        assert span.parent is not None
+        assert span.parent.is_remote is True
+        assert span.parent.trace_id==int("4bf92f3577b34da6a3ce929d0e0e4736",16)
+        assert span.parent.span_id==int("00f067aa0ba902b7",16)
+        assert span.attributes["gateway.route.generation"]==7
+        assert span.attributes["gateway.outcome"]=="READY"
+        assert "tenant_id" not in repr(span.attributes)
+        assert "account_id" not in repr(span.attributes)
+        assert "private-session" not in repr(span.attributes)
+        assert not span.end_time is None
+        # The activation span is already exported while the managed socket
+        # remains open; it is not held for the full connection lifetime.
+        assert not task.done()
+    finally:
+        stop=task.get_coro().cr_frame.f_locals.get("stop")
+        if stop is not None:
+            stop.set()
+        await asyncio.wait_for(task,1)
+        provider.shutdown()
