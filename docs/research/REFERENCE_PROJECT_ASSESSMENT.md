@@ -476,3 +476,16 @@ pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page 
 - 当前只完成 API request → durable desired-route update → Gateway activation 相关性；PR #27 运行时 Gateway 仍是 read-only connection supervisor，尚未执行 PR #28 persistent business send-command queue。因此不能宣称业务发送命令已完成全链路追踪。
 - 仍未完成：Worker/Gateway business command queue trace propagation、queue/lease/FloodWait/UNKNOWN metrics、trace-to-log correlation、真实 Collector/OTLP auth/retention/dashboard、PITR restore drill、前端 SDK/UX、Telegram sandbox。PR #42/#45/#46/#48 均仍待非作者正式 Review，未合并。
 - 本轮未发 Telegram RPC/消息、未改业务发送行为、未应用生产 migration、未部署 Collector 或生产服务。
+
+
+## 2026-11-06｜Durable Gateway command queue trace propagation — PR #49
+
+- [PR #49](https://github.com/xe4716-svg/Tgsa/pull/49) 已完成 exact-head CI 并转为 Ready for Review；分支 `feat/tgm-022-gateway-command-trace`，HEAD `e51a282491f2953d1d636abcb71124b4aa849f9d`，base 为 PR #28 分支 `fix/asd-30-account-broadcast-gateway`；未合并，正式 Review 尚未提交。
+- 新增 migration `018_gateway_command_trace_context.sql`：`gateway_account_commands.traceparent` 只允许格式合法且 trace/span ID 非全零的 W3C version-00 context。新增 SECURITY DEFINER wrapper 调用原有租户授权/幂等 submit function，只写入首个可用 producer traceparent；撤销 submitter 对旧 5 参数函数的直接权限，强制经 trace-aware wrapper 入队。
+- `GatewayCommandStore.submit_text` 只注入当前 span 的 traceparent；不保存 baggage/tracestate/消息正文/peer/tenant/account ID/request headers。claim function 仅把 traceparent 返回给受限 Gateway executor；dataclass equality/repr 排除该字段。
+- `GatewayCommandExecutor` 在已领取命令后创建短时 `gateway.command.execute` consumer span，使用 durable remote parent；仅记录 operation kind、route generation、bounded outcome、FloodWait retry delay 和 sanitized exception class。
+- Gateway worker 的 OTLP provider 独立 opt-in，使用私有 OTLP endpoint 配置，退出时 shutdown；没有 endpoint 时 tracing disabled。
+- [Root Integration run 42205615073](https://github.com/xe4716-svg/Tgsa/actions/runs/42205615073)：**3/3 jobs success**；Root **326 passed / 24 skipped**；notification/login **27 passed**；preserved V2 **208 passed**；Compose API/Bot/MTProto readiness、隔离 secrets、schema replay 和 authorization smoke 成功。
+- [Gateway command safety run 42205615045](https://github.com/xe4716-svg/Tgsa/actions/runs/42205615045)：成功；**318 passed / 32 skipped**，包括 disposable PostgreSQL command-role integration，实际验证 migration 018、traceparent 持久化、幂等 retry 保留原 parent、claim propagation 和 fake command transport。
+- 重要范围边界：PR #28 当前 Gateway worker 尚未安装 production command store/transport，仓库也没有 production `submit_text` caller。PR #49 验证 durable queue context + injected executor tracing，不代表生产 command sender 或 Telegram broadcast 已接通。没有真实 Telegram RPC/message。
+- PR #49 当前 Open + Ready for Review，未合并；需非作者正式 Review。后续：将 command trace helper 与 PR #48 API/Gateway activation tracing 整合，接入真实 AccountBroadcast producer/transport 前先完成 PR #28 的 sender/adapter 安全验收；随后再做 queue depth/age/FloodWait/UNKNOWN metrics 与 trace-correlated structured logs。
