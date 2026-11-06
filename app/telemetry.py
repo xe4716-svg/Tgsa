@@ -20,7 +20,10 @@ _TRACEPARENT_RE = re.compile(r"^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
 
 
 def is_valid_traceparent(value: object) -> bool:
-    return isinstance(value, str) and _TRACEPARENT_RE.fullmatch(value) is not None
+    if not isinstance(value, str) or _TRACEPARENT_RE.fullmatch(value) is None:
+        return False
+    _, trace_id, span_id, _ = value.split("-")
+    return trace_id != "0" * 32 and span_id != "0" * 16
 
 
 def current_traceparent() -> str | None:
