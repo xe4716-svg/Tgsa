@@ -102,9 +102,10 @@ baggage, raw request headers, or tenant/account identifiers.
   `gateway.account.activate` consumer span. The span ends once the account is
   authorized and ready; it does not remain open for the potentially long-lived
   MTProto socket.
-- Only the numeric route generation and a bounded outcome code are attached.
-  Account IDs, tenant IDs, session material, proxy settings, and Telegram user
-  identifiers are never span attributes.
+- Attributes are limited to numeric route generation, bounded outcome code,
+  and (on startup failure only) exception class plus the fixed source function
+  name. Account IDs, tenant IDs, session material, proxy settings, exception
+  messages, and Telegram user identifiers are never span attributes.
 - Worker tracing is independently opt-in through
   `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`.
   The worker owns and shuts down its provider. Without an endpoint it emits no
