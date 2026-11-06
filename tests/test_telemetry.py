@@ -21,6 +21,8 @@ def test_traceparent_is_only_emitted_from_a_valid_active_span():
             assert extracted is not None
         assert extract_trace_context("00-not-a-valid-traceparent") is None
         assert extract_trace_context(None) is None
+        assert not is_valid_traceparent("00-" + "0" * 32 + "-00f067aa0ba902b7-01")
+        assert not is_valid_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-" + "0" * 16 + "-01")
     finally:
         provider.shutdown()
 
