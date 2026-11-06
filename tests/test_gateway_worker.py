@@ -26,10 +26,10 @@ async def test_gateway_worker_resource_cleanup_and_sanitized_exit(monkeypatch,ca
         def __init__(self,store,factory,tenants,**kwargs):
             captured.append((tenants,kwargs))
             factory()
-    class Runner:
-        def __init__(self,*args,**kwargs):runner_kwargs.append(kwargs)
         async def serve(self,stop):
             if failure:raise failure
+    class Runner:
+        def __init__(self,*args,**kwargs):runner_kwargs.append(kwargs)
     monkeypatch.setattr(gateway.asyncpg,'create_pool',pool)
     monkeypatch.setattr(gateway,'install_signal_handlers',lambda stop:[lambda:restored.append(True)])
     monkeypatch.setattr(gateway,'configure_worker_tracing',lambda **kwargs:provider)
