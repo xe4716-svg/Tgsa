@@ -152,3 +152,25 @@ Command executor events use fixed event names for completion, FloodWait,
 UNKNOWN and sanitized failure. This provides trace-to-log correlation without
 turning log messages or user payloads into telemetry attributes. When no active
 span exists, the event remains structured but has no trace identifiers.
+
+
+## Fenced Gateway queue metrics (TGM-022)
+
+Migration `019_gateway_command_metrics.sql` adds a SECURITY DEFINER aggregate
+read function for the current Gateway executor. It verifies the executor role,
+account route generation, worker ID, fencing token and live lease before
+returning only queued/claimed/unknown/flood_wait counts and oldest queued age.
+The executor role receives function access, not direct command-table SELECT.
+
+The Gateway worker's OTLP metrics provider is opt-in through
+`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`.
+When enabled, each account executor samples queue state at most once every
+15 seconds. Samples are aggregated in memory across accounts and exported
+without account/tenant/peer labels. The metrics include bounded command
+execution counts/duration, queue age, FloodWait duration, UNKNOWN count,
+aggregate queue depth by fixed state and oldest queued age.
+
+Metrics sampling and recording are best effort: telemetry failures do not stop
+command dispatch, change command state, or block disconnect cleanup. No
+Collector, retention policy or production metrics endpoint is deployed by this
+PoC.
