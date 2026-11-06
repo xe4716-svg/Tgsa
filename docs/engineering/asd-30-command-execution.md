@@ -102,3 +102,37 @@ Full results are retained as JUnit artifacts in CI. Local reports are under
 `.local/asd30-*.xml` and remain outside source control. Do not treat skipped
 integration suites, fake message IDs or historical imported reports as real
 Telegram or production acceptance evidence.
+
+
+## Durable command trace context (TGM-022)
+
+Migration `018_gateway_command_trace_context.sql` adds a nullable, format-checked
+W3C `traceparent` to each durable Gateway command. The trace-aware submit
+function wraps the existing authorized/idempotent submit function; it stores only
+the first producer parent and preserves it on idempotent retries. The legacy
+five-argument submit function is no longer executable by the submitter role.
+
+`GatewayCommandStore.submit_text` injects only the active W3C traceparent.
+Baggage, tracestate, message text, peer IDs, tenant/account IDs and request
+headers are not persisted as telemetry context. The Gateway claim function
+returns the traceparent only to the dedicated executor role. The executor starts
+a short consumer span parented to that remote context and records only bounded
+operation kind, route generation, outcome, retry delay and sanitized exception
+class. The traceparent is excluded from dataclass equality and repr.
+
+Gateway worker tracing is opt-in through
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`; the
+worker owns and shuts down its provider. Without an endpoint, tracing is off.
+
+This is a queue-context PoC, not production command-send activation. The current
+Gateway worker does not yet install a production command store/transport, and
+the current repository has no production caller of `submit_text`. The executor
+is validated with a fake sender and the PostgreSQL command integration test.
+Do not claim real Telegram command delivery or end-to-end business broadcast
+tracing until the AccountBroadcast adapter and production transport are wired
+and independently reviewed.
+
+The dedicated PostgreSQL integration now also verifies that a producer span is
+persisted and survives an idempotent retry under a different span, then is
+returned with the claimed command. It uses disposable database instances and
+fake transports only; no Telegram RPC is sent.
