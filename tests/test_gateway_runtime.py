@@ -197,9 +197,10 @@ async def test_gateway_activation_span_uses_durable_remote_parent_and_ends_at_re
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     runner,leases,client,_=await setup(tracer=provider.get_tracer("tgmate.gateway-test"))
     ready=asyncio.Event()
+    stop=asyncio.Event()
     traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
     task=asyncio.create_task(runner.run(
-        leases.lease.tenant_id,leases.lease.account_id,asyncio.Event(),
+        leases.lease.tenant_id,leases.lease.account_id,stop,
         ready=ready,route_generation=7,traceparent=traceparent,
     ))
 
@@ -223,8 +224,6 @@ async def test_gateway_activation_span_uses_durable_remote_parent_and_ends_at_re
         # remains open; it is not held for the full connection lifetime.
         assert not task.done()
     finally:
-        stop=task.get_coro().cr_frame.f_locals.get("stop")
-        if stop is not None:
-            stop.set()
+        stop.set()
         await asyncio.wait_for(task,1)
         provider.shutdown()
