@@ -463,3 +463,16 @@ pgBackRest v2.60.0 的 release note 特别说明：restore 时遇到无效 page 
 - [Root Integration run 42083225285](https://github.com/xe4716-svg/Tgsa/actions/runs/42083225285)：**3/3 jobs success**。Root tests **314 passed / 23 skipped**；notification/login **27 passed**；preserved V2 **208 passed**；Compose smoke 通过，并在运行中 API 容器请求 `/openapi.json` 验证 health、auth login、Telegram QR login、Gateway route 的 path/method。
 - 运行时 OpenAPI schema 验证已由静态源码盘点升级为隔离 Compose 真实 API 容器验证；仍未做前端 SDK 自动生成/兼容 diff，也未做 TGM-012 UI/UX 验收。
 - PR #42/#45/#46 均未合并；#42/#45/#46 的正式非作者 Review 仍需分别确认。
+
+
+## 2026-11-06｜API → durable Gateway route activation trace PoC — PR #48
+
+- [PR #48](https://github.com/xe4716-svg/Tgsa/pull/48) 已完成 exact-head Root Integration CI 并转为 Ready for Review；仍未合并，base 为 PR #46 分支 `test/tgm-022-openapi-runtime-contract`。
+- 独立分支 `feat/tgm-022-gateway-trace-context`，exact HEAD `e749da183cf34f1ccfa8036d971561af717e9d24`；新增 migration `013_gateway_trace_context.sql`，在 `account_gateway_routes` 保存格式受限的 W3C traceparent。
+- Gateway route enable API 只写入当前 server span traceparent；不保存 tracestate、baggage、headers、tenant/account identifiers。Gateway supervisor 通过条件 UPDATE 一次性消费 traceparent，只锁定携带上下文的 route row；traceparent 不参与 route identity，也不出现在 API response/repr。
+- GatewayRunner 使用 remote parent 创建短时 `gateway.account.activate` consumer span，在账号授权和 readiness 成功后结束，不将 span 挂在可能运行数小时的 MTProto socket 上。仅记录 route generation、bounded outcome 和失败时的 exception class/source function；不记录异常消息或账号/租户/session/proxy/Telegram ID。
+- Gateway/standalone MTProto worker 的 OTLP provider 独立 opt-in，未配置 endpoint 时无遥测网络请求；进程退出时 shutdown/flush。
+- [Root Integration run 42159112586](https://github.com/xe4716-svg/Tgsa/actions/runs/42159112586)：3/3 jobs success；Root **320 passed / 23 skipped**；notification/login **27 passed**；preserved V2 **208 passed**；Compose readiness、isolated secrets、migration replay、runtime OpenAPI、traceparent column/constraint 和 authorization smoke 全部通过。
+- 当前只完成 API request → durable desired-route update → Gateway activation 相关性；PR #27 运行时 Gateway 仍是 read-only connection supervisor，尚未执行 PR #28 persistent business send-command queue。因此不能宣称业务发送命令已完成全链路追踪。
+- 仍未完成：Worker/Gateway business command queue trace propagation、queue/lease/FloodWait/UNKNOWN metrics、trace-to-log correlation、真实 Collector/OTLP auth/retention/dashboard、PITR restore drill、前端 SDK/UX、Telegram sandbox。PR #42/#45/#46/#48 均仍待非作者正式 Review，未合并。
+- 本轮未发 Telegram RPC/消息、未改业务发送行为、未应用生产 migration、未部署 Collector 或生产服务。
