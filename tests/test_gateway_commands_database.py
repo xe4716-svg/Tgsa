@@ -13,6 +13,8 @@ from psycopg import sql
 import pytest
 
 from app.telegram.gateway_command_store import GatewayCommandStore
+from app.telemetry import current_traceparent
+from opentelemetry.sdk.trace import TracerProvider
 
 
 @pytest.mark.skipif(os.getenv('TGMATE_COMMAND_INTEGRATION') != '1', reason='disposable PostgreSQL opt-in required')
@@ -60,8 +62,18 @@ def test_command_roles_mapping_fencing_recovery():
                         # Root IDs must not be accepted as business IDs.
                         with pytest.raises(asyncpg.InsufficientPrivilegeError):
                             await s.submit_text(tenant,account,1,key,123,'hello')
-                        command_id=await s.submit_text(business,account,1,key,123,'hello')
-                        assert await s.submit_text(business,account,1,key,123,'hello') == command_id
+                        provider=TracerProvider()
+                        tracer=provider.get_tracer("business-command-submit-test")
+                        try:
+                            with tracer.start_as_current_span("business.broadcast.enqueue"):
+                                expected_traceparent=current_traceparent()
+                                command_id=await s.submit_text(business,account,1,key,123,'hello')
+                            # An idempotent retry under a different span must preserve
+                            # the original producer parent instead of overwriting it.
+                            with tracer.start_as_current_span("business.broadcast.retry"):
+                                assert await s.submit_text(business,account,1,key,123,'hello') == command_id
+                        finally:
+                            provider.shutdown()
                         with pytest.raises(asyncpg.UniqueViolationError):
                             await s.submit_text(business,account,1,key,123,'changed')
                         assert await e.claim_next(tenant,account,'gateway-test',6) is None
@@ -69,6 +81,7 @@ def test_command_roles_mapping_fencing_recovery():
                         command=next(c for c in claims if c is not None)
                         assert sum(c is not None for c in claims)==1
                         assert command.payload == {'text':'hello'}
+                        assert command.traceparent == expected_traceparent
                         args=(tenant,command.id,'gateway-test',7)
                         assert not await e.finish(*args,'succeeded',remote_message_id=10)
                         owner.execute("UPDATE telegram_accounts SET status='PAUSED' WHERE id=%s", (account,))
