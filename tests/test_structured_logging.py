@@ -69,6 +69,12 @@ def test_formatter_drops_unknown_event_names_and_unbounded_extra_fields():
     assert "request_url" not in record
     assert "untrusted text" not in output.getvalue()
 
+    logger.info(
+        "non-string metadata",
+        extra={"event_name":{"unhashable":"event"},"command_kind":{"unhashable":"kind"},"outcome":[]},
+    )
+    assert json.loads(output.getvalue().splitlines()[-1])["event"]=="application.log"
+
 
 def test_configure_structured_logging_is_idempotent():
     logger=configure_structured_logging(logger_name="tgmate.gateway.test.idempotent",stream=StringIO())
