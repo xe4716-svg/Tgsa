@@ -4,12 +4,15 @@ Transport must be explicitly injected. No production Telegram sender is installe
 Any exception after dispatch is conservatively unknown; never retry that RPC.
 """
 import asyncio
+import logging
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from telethon.errors import FloodWaitError
 
 from app.telemetry import extract_trace_context
+
+logger = logging.getLogger("tgmate.gateway.commands")
 
 
 class CommandResultUncertain(RuntimeError):
@@ -44,18 +47,58 @@ class GatewayCommandExecutor:
             span.set_attribute("gateway.route.generation", generation)
             try:
                 result = await self._dispatch(command, lease, generation, client, controlled, timeout)
-                span.set_attribute("gateway.command.outcome", "SUCCEEDED" if result else "IDLE")
+                outcome = "SUCCEEDED" if result else "IDLE"
+                span.set_attribute("gateway.command.outcome", outcome)
+                logger.info(
+                    "gateway command completed",
+                    extra={
+                        "event_name": "gateway.command.completed",
+                        "command_kind": command.operation_kind,
+                        "outcome": outcome,
+                        "route_generation": generation,
+                    },
+                )
                 return result
             except FloodWaitError as exc:
                 span.set_attribute("gateway.command.outcome", "FLOOD_WAIT")
-                span.set_attribute("gateway.retry_after_seconds", max(1, int(exc.seconds)))
+                retry_after = max(1, int(exc.seconds))
+                span.set_attribute("gateway.retry_after_seconds", retry_after)
+                logger.warning(
+                    "gateway command flood wait",
+                    extra={
+                        "event_name": "gateway.command.flood_wait",
+                        "command_kind": command.operation_kind,
+                        "outcome": "FLOOD_WAIT",
+                        "route_generation": generation,
+                        "retry_after_seconds": retry_after,
+                    },
+                )
                 raise
             except CommandResultUncertain:
                 span.set_attribute("gateway.command.outcome", "UNKNOWN")
+                logger.warning(
+                    "gateway command result unknown",
+                    extra={
+                        "event_name": "gateway.command.unknown",
+                        "command_kind": command.operation_kind,
+                        "outcome": "UNKNOWN",
+                        "route_generation": generation,
+                    },
+                )
                 raise
             except BaseException as exc:
                 span.set_attribute("gateway.command.outcome", "ERROR")
                 span.set_attribute("exception.type", type(exc).__name__)
+                logger.error(
+                    "gateway command failed",
+                    extra={
+                        "event_name": "gateway.command.error",
+                        "command_kind": command.operation_kind,
+                        "outcome": "ERROR",
+                        "route_generation": generation,
+                        "exception_type": type(exc).__name__,
+                    },
+                )
                 raise
 
     async def _dispatch(self, command, lease, generation, client, controlled, timeout):

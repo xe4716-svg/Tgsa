@@ -136,3 +136,19 @@ The dedicated PostgreSQL integration now also verifies that a producer span is
 persisted and survives an idempotent retry under a different span, then is
 returned with the claimed command. It uses disposable database instances and
 fake transports only; no Telegram RPC is sent.
+
+
+## Trace-correlated structured Gateway logs (TGM-022)
+
+The Gateway worker configures an allowlisted JSON logger. The log filter attaches
+only the active span's trace ID and span ID. The formatter intentionally ignores
+free-form log messages, arguments, exception text and arbitrary extra fields;
+it emits only a small event allowlist and bounded command metadata
+(operation kind, outcome, route generation, FloodWait retry delay, exception
+class). Tenant/account IDs, peer IDs, operation keys, message bodies, session
+material, URLs and request headers are never serialized.
+
+Command executor events use fixed event names for completion, FloodWait,
+UNKNOWN and sanitized failure. This provides trace-to-log correlation without
+turning log messages or user payloads into telemetry attributes. When no active
+span exists, the event remains structured but has no trace identifiers.
