@@ -5,6 +5,7 @@ here. Database ownership does not cancel an already issued Telegram request.
 """
 import asyncio
 import time
+import traceback
 from dataclasses import dataclass
 
 from opentelemetry import context as otel_context, trace
@@ -203,7 +204,11 @@ class GatewayRunner:
         except Exception as exc:
             # Exception type is safe to retain for diagnosis; the message may
             # contain session, network, database or user-controlled material.
-            trace.get_current_span().set_attribute("exception.type", type(exc).__name__)
+            span = trace.get_current_span()
+            span.set_attribute("exception.type", type(exc).__name__)
+            frames = traceback.extract_tb(exc.__traceback__)
+            if frames:
+                span.set_attribute("gateway.failure.location", frames[-1].name)
             return GatewayResult('GATEWAY_FAILED')
         finally:
             lost.set()
