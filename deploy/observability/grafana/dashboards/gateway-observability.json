@@ -1,0 +1,61 @@
+{
+  "id": null,
+  "uid": "tgmate-gateway-observability",
+  "title": "TGMate Gateway Observability",
+  "tags": ["tgmate", "gateway", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Command execution rate by outcome",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "sum by (outcome) (rate(tgmate_gateway_command_executions_total[5m]))", "legendFormat": "{{outcome}}", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Durable queue depth",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "tgmate_gateway_command_queue_depth", "legendFormat": "{{state}}", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Oldest queued command age",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "tgmate_gateway_command_queue_oldest_age", "legendFormat": "seconds", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "UNKNOWN command rate",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "sum(rate(tgmate_gateway_command_unknown_total[5m]))", "legendFormat": "unknown/s", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "FloodWait duration",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [{"expr": "rate(tgmate_gateway_command_flood_wait_sum[5m]) / clamp_min(rate(tgmate_gateway_command_flood_wait_count[5m]), 1)", "legendFormat": "average seconds", "refId": "A"}]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Command execution duration",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(tgmate_gateway_command_duration_bucket[5m])))", "legendFormat": "p95 seconds", "refId": "A"}]
+    }
+  ]
+}
