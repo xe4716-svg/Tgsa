@@ -5,6 +5,9 @@ from uuid import uuid4
 
 import pytest
 from telethon.errors import FloodWaitError
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.telegram.gateway_command_executor import GatewayCommandExecutor, CommandResultUncertain
 from app.telegram.gateway_leases import AccountLease
@@ -19,7 +22,8 @@ def fixture():
     lease=AccountLease(uuid4(),uuid4(),'test',7)
     command=SimpleNamespace(id=uuid4(),tenant_id=lease.tenant_id,account_id=lease.account_id,
         route_generation=3,claim_worker_id='test',claim_fencing_token=7,
-        operation_kind='preflight_send_text',payload={'text':'synthetic'},destination_peer_id=123)
+        operation_kind='preflight_send_text',payload={'text':'synthetic'},destination_peer_id=123,
+        traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01')
     store=SimpleNamespace(recover_expired=AsyncMock(return_value=(0,0)),claim_next=AsyncMock(return_value=command),
         mark_dispatch_started=AsyncMock(return_value=True),finish=AsyncMock(return_value=True))
     return lease,command,store,AsyncMock(return_value=42)
@@ -102,3 +106,31 @@ async def test_runner_unknown_stops_and_disconnects():
     command.claim_fencing_token=1;leases.conn.fetchval=AsyncMock(return_value=True)
     assert (await runner.run(command.tenant_id,command.account_id,asyncio.Event(),route_generation=3)).reason=='COMMAND_UNCERTAIN'
     sender.assert_awaited_once();client.disconnect.assert_awaited_once()
+
+
+
+@pytest.mark.anyio
+async def test_command_consumer_span_uses_persisted_remote_parent_and_excludes_payload():
+    lease,command,store,sender=fixture()
+    exporter=InMemorySpanExporter()
+    provider=TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    try:
+        executor=GatewayCommandExecutor(store,sender,tracer=provider.get_tracer("gateway-command-test"))
+        assert await executor.execute_one(lease,3,object(),controlled,1)
+        spans=exporter.get_finished_spans()
+        assert len(spans)==1
+        span=spans[0]
+        assert span.name=="gateway.command.execute"
+        assert span.kind.name=="CONSUMER"
+        assert span.parent is not None and span.parent.is_remote
+        assert span.parent.trace_id==int("4bf92f3577b34da6a3ce929d0e0e4736",16)
+        assert span.parent.span_id==int("00f067aa0ba902b7",16)
+        assert span.attributes["gateway.command.kind"]=="preflight_send_text"
+        assert span.attributes["gateway.command.outcome"]=="SUCCEEDED"
+        assert span.attributes["gateway.route.generation"]==3
+        rendered=repr(span.attributes)
+        for secret in ("synthetic","123",str(lease.tenant_id),str(lease.account_id),str(command.id)):
+            assert secret not in rendered
+    finally:
+        provider.shutdown()
