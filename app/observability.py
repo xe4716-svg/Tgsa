@@ -21,6 +21,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import SpanKind, Status, StatusCode, Tracer
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 
 class RequestTraceMiddleware:
@@ -144,6 +145,64 @@ def configure_request_tracing(
         tracer=provider.get_tracer("tgmate.http", "1.0.0"),
     )
     app.state.tracing_provider = provider
+    return provider
+
+
+def current_traceparent() -> str | None:
+    """Return only the active W3C traceparent; never persist tracestate or baggage."""
+    carrier: dict[str, str] = {}
+    TraceContextTextMapPropagator().inject(carrier)
+    value = carrier.get("traceparent")
+    return value if isinstance(value, str) and len(value) == 55 else None
+
+
+def configure_worker_tracing(
+    *,
+    endpoint: str | None = None,
+    service_name: str | None = None,
+    environment: str | None = None,
+    sample_rate: float | None = None,
+    exporter: SpanExporter | None = None,
+) -> TracerProvider | None:
+    """Create an opt-in provider for a standalone worker process.
+
+    The caller owns provider shutdown. No global provider or middleware is changed.
+    """
+    configured_endpoint = endpoint
+    if configured_endpoint is None:
+        configured_endpoint = (
+            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+            or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        )
+    if not configured_endpoint or not configured_endpoint.strip():
+        return None
+
+    configured_rate = sample_rate
+    if configured_rate is None:
+        try:
+            configured_rate = float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "0.1"))
+        except ValueError as exc:
+            raise RuntimeError("OTEL_TRACES_SAMPLER_ARG must be a number from 0 to 1") from exc
+    if not 0.0 <= configured_rate <= 1.0:
+        raise RuntimeError("OTEL_TRACES_SAMPLER_ARG must be a number from 0 to 1")
+
+    if exporter is None:
+        exporter = (
+            OTLPSpanExporter(endpoint=configured_endpoint)
+            if endpoint is not None
+            else OTLPSpanExporter()
+        )
+
+    provider = TracerProvider(
+        resource=Resource.create(
+            {
+                "service.name": service_name or os.getenv("OTEL_SERVICE_NAME", "tgmate-worker"),
+                "deployment.environment.name": environment or os.getenv("APP_ENV", "development"),
+            }
+        ),
+        sampler=ParentBased(root=TraceIdRatioBased(configured_rate)),
+    )
+    provider.add_span_processor(BatchSpanProcessor(exporter))
     return provider
 
 
