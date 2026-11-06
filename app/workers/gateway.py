@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from app.config import settings
+from app.observability import configure_worker_tracing
 from app.security.session_vault import SessionVault
 from app.telegram.gateway_routes import GatewayRoutes
 from app.telegram.gateway_runtime import GatewayRunner, GatewayCloseUncertain
@@ -18,12 +19,18 @@ from app.workers.billing import install_signal_handlers
 async def run(tenants, capacity=20, per_tenant=5):
     stop=asyncio.Event()
     restorers=[]
+    tracing_provider=None
     try:
+        tracing_provider=configure_worker_tracing(
+            service_name="tgmate-mtproto-gateway",
+            environment=settings.app_env,
+        )
+        tracer=tracing_provider.get_tracer("tgmate.gateway","1.0.0") if tracing_provider else None
         restorers=install_signal_handlers(stop)
         vault=SessionVault.from_base64(settings.session_kek_base64,settings.session_kek_id)
         async with asyncpg.create_pool(settings.database_url,min_size=1,max_size=10,command_timeout=3) as pool:
             supervisor=GatewaySupervisor(GatewayRoutes(pool),
-                lambda:GatewayRunner(pool,vault,'gateway-'+str(uuid4())),tenants,
+                lambda:GatewayRunner(pool,vault,'gateway-'+str(uuid4()),tracer=tracer),tenants,
                 capacity=capacity,per_tenant=per_tenant)
             await supervisor.serve(stop)
         print(json.dumps({'state':'stopped','reason':'STOPPED'}))
@@ -35,8 +42,12 @@ async def run(tenants, capacity=20, per_tenant=5):
         print(json.dumps({'state':'stopped','reason':'SUPERVISOR_FAILED'}))
         return 2
     finally:
-        for restore in reversed(restorers):
-            restore()
+        try:
+            if tracing_provider is not None:
+                tracing_provider.shutdown()
+        finally:
+            for restore in reversed(restorers):
+                restore()
 
 
 def main(argv=None):
