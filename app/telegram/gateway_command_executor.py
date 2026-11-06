@@ -70,10 +70,13 @@ class GatewayCommandExecutor:
 
         def record_metrics(outcome):
             if self.metrics is not None:
-                self.metrics.record_execution(
-                    command.operation_kind, outcome,
-                    time.perf_counter() - started_at, queue_age,
-                )
+                try:
+                    self.metrics.record_execution(
+                        command.operation_kind, outcome,
+                        time.perf_counter() - started_at, queue_age,
+                    )
+                except Exception:
+                    pass
 
         parent_context = extract_trace_context(getattr(command, "traceparent", None))
         with self.tracer.start_as_current_span(
@@ -108,7 +111,10 @@ class GatewayCommandExecutor:
                 span.set_attribute("gateway.retry_after_seconds", retry_after)
                 record_metrics("FLOOD_WAIT")
                 if self.metrics is not None:
-                    self.metrics.record_flood_wait(retry_after)
+                    try:
+                        self.metrics.record_flood_wait(retry_after)
+                    except Exception:
+                        pass
                 logger.warning(
                     "gateway command flood wait",
                     extra={
