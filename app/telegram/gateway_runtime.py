@@ -200,7 +200,10 @@ class GatewayRunner:
             return GatewayResult('WAIT_PERSIST_FAILED',max(1,exc.seconds))
         except LeaseLost:
             return GatewayResult(failure)
-        except Exception:
+        except Exception as exc:
+            # Exception type is safe to retain for diagnosis; the message may
+            # contain session, network, database or user-controlled material.
+            trace.get_current_span().set_attribute("exception.type", type(exc).__name__)
             return GatewayResult('GATEWAY_FAILED')
         finally:
             lost.set()
